@@ -1,0 +1,23 @@
+{
+    "deploy": [
+        "../CELLAG/deploy.md"
+    ],
+    "docs": "",
+    "features": [],
+    "images": [
+        "PYBv1_1.jpg",
+        "PYBv1_1-C.jpg",
+        "PYBv1_1-E.jpg"
+    ],
+    "mcu": "stm32f4",
+    "product": "CellAgv0.7",
+    "thumbnail": "",
+    "url": "www.google.com",
+    "variants": {
+        "DP": "Double-precision float",
+        "DP_THREAD": "Double precision float + Threads",
+        "NETWORK": "Wiznet 5200 Driver",
+        "THREAD": "Threading"
+    },
+    "vendor": "CellAg"
+}
