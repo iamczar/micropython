@@ -3,12 +3,12 @@
 
 #define MICROPY_HW_HAS_SWITCH       (1)
 #define MICROPY_HW_HAS_FLASH        (1)
-#define MICROPY_HW_HAS_MMA7660      (1)
-#define MICROPY_HW_HAS_LCD          (1)
-#define MICROPY_HW_ENABLE_RNG       (1)
-#define MICROPY_HW_ENABLE_RTC       (1)
-#define MICROPY_HW_ENABLE_SERVO     (1)
-#define MICROPY_HW_ENABLE_DAC       (1)
+#define MICROPY_HW_HAS_MMA7660      (0)
+#define MICROPY_HW_HAS_LCD          (0)
+#define MICROPY_HW_ENABLE_RNG       (0)
+#define MICROPY_HW_ENABLE_RTC       (0)
+#define MICROPY_HW_ENABLE_SERVO     (0)
+#define MICROPY_HW_ENABLE_DAC       (0)
 #define MICROPY_HW_ENABLE_USB       (1)
 #define MICROPY_HW_ENABLE_SDCARD    (1)
 
@@ -65,7 +65,7 @@
 //#define MICROPY_HW_SPI2_MOSI (pin_B15) // Y8
 
 // I2S buses
-#define MICROPY_HW_I2S2      (1)
+//#define MICROPY_HW_I2S2      (1)
 
 // CAN buses
 // #define MICROPY_HW_CAN1_NAME "YA"
