@@ -2,7 +2,7 @@
 #define MICROPY_HW_MCU_NAME         "STM32F405RG"
 
 #define MICROPY_HW_HAS_SWITCH       (1)
-#define MICROPY_HW_HAS_FLASH        (1)
+#define MICROPY_HW_HAS_FLASH        (1) // nothing
 #define MICROPY_HW_HAS_MMA7660      (0)
 #define MICROPY_HW_HAS_LCD          (0)
 #define MICROPY_HW_ENABLE_RNG       (0)
@@ -102,52 +102,10 @@
 //#define MICROPY_HW_USB_OTG_ID_PIN      (pin_A10)
 
 // MMA accelerometer config
-#define MICROPY_HW_MMA_AVDD_PIN     (pin_B5)
+//#define MICROPY_HW_MMA_AVDD_PIN     (pin_B5)
 
 // Bootloader configuration (only needed if Mboot is used)
 #define MBOOT_I2C_PERIPH_ID 1
 #define MBOOT_I2C_SCL (pin_B8)
 #define MBOOT_I2C_SDA (pin_B9)
 #define MBOOT_I2C_ALTFUNC (4)
-
-// #undef MICROPY_ALLOC_PATH_MAX
-// #define MICROPY_ALLOC_PATH_MAX (64)
-
-// #undef MICROPY_PY_HASHLIB_MD5
-// #define MICROPY_PY_HASHLIB_MD5 (0)
-
-// #undef MICROPY_PY_HASHLIB_SHA1
-// #define MICROPY_PY_HASHLIB_SHA1 (0)
-
-// #undef MICROPY_PY_CRYPTOLIB
-// #define MICROPY_PY_CRYPTOLIB (0)
-
-// #undef MICROPY_PY_WEBSOCKET
-// #define MICROPY_PY_WEBSOCKET (0)
-
-// #undef MICROPY_PY_WEBREPL
-// #define MICROPY_PY_WEBREPL (0)
-
-// #undef MICROPY_PY_SOCKET
-// #define MICROPY_PY_SOCKET (0)
-
-// #undef MICROPY_PY_ONEWIRE
-// #define MICROPY_PY_ONEWIRE (0)
-
-// #undef MICROPY_PY_NETWORK
-// #define MICROPY_PY_NETWORK (0)
-
-// #undef MICROPY_HW_NIC_ETH
-// #define MICROPY_HW_NIC_ETH (0)
-
-// #undef MICROPY_HW_NIC_CYW43
-// #define MICROPY_HW_NIC_CYW43 (0)
-
-// #undef MICROPY_HW_NIC_WIZNET5K
-// #define MICROPY_HW_NIC_WIZNET5K (0)
-
-// #undef MICROPY_BOARD_NETWORK_INTERFACES
-// #define MICROPY_BOARD_NETWORK_INTERFACES (0)
-
-// #undef MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
-// #define MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE (0)
