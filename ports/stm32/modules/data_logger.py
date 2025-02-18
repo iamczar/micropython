@@ -52,10 +52,9 @@ class DataLogger:
         self.subscribe_to_topic("pressure-sen", self.handle_event_pressure)
         self.subscribe_to_topic("oxy-pump-01-status",self.handle_oxy_pump_status)
         self.subscribe_to_topic("press-pump-02-status",self.handle_press_pump_status)
-        
-        # self.last_snapshot_time = utime.ticks_ms()  # Track the last snapshot time in milliseconds
-        # self.snapshot_interval_ms = 10000  # Set interval to 10 seconds (10000 ms)
-        
+        self.subscribe_to_topic("circ-flow-pid",self.handle_circ_flow_pid)
+        self.subscribe_to_topic("pressure-pid",self.handle_press_pid)
+               
         # Subscribe to the data-logger-actuator to start/stop logging
         self.subscribe_to_topic("data-log-cmd", self.handle_event_datalogger)
 
@@ -84,19 +83,14 @@ class DataLogger:
                 if self.log_active:
                     # Write sensor data to the file
                     self._write_to_file()
-
-                    # Publish sensor data to the event bus
+                    
+                # Publish sensor data to the event bus
                 await self.event_bus.publish("sensor-data", self.sensor_data_array)
-
-                # Debug log (optional)
-                # if self.logger:
-                #     self.logger.debug("Sensor data logged and published.")
             except Exception as e:
                 if self.logger:
                     self.logger.error(f"Error in logging loop: {e}")
-            finally:
-                # Sleep for the logging interval
-                await asyncio.sleep(self.sensor_read_interval)
+
+            await asyncio.sleep(self.sensor_read_interval)
 
     async def handle_event_datalogger(self, data):
         """Handles start/stop commands for logging."""
@@ -156,6 +150,22 @@ class DataLogger:
         # if self.logger:
         #     self.logger.debug(f"p2 speed: {data}")
         await asyncio.sleep(0)
+        
+    async def handle_circ_flow_pid(self,data):
+        sp,kp,ki,kd = data
+        self.sensor_data_array[SensorDataIndex.PRESSURESETPOINT] = sp
+        self.sensor_data_array[SensorDataIndex.PRESSUREKP] = kp
+        self.sensor_data_array[SensorDataIndex.PRESSUREKI] = ki
+        self.sensor_data_array[SensorDataIndex.PRESSUREKD] = kd
+        await asyncio.sleep(0)
+    
+    async def handle_press_pid(self,data):
+        sp,kp,ki,kd = data
+        self.sensor_data_array[SensorDataIndex.OXYGENSETPOINT] = sp
+        self.sensor_data_array[SensorDataIndex.OXYGENKP] = kp
+        self.sensor_data_array[SensorDataIndex.OXYGENKI] = ki
+        self.sensor_data_array[SensorDataIndex.OXYGENKD] = kd
+        
         
     def _write_to_file(self):
         """Write the sensor data directly to the CSV file and refresh the SD card."""
