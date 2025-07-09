@@ -151,7 +151,7 @@ class DataLogger:
         #     self.logger.debug(f"p2 speed: {data}")
         await asyncio.sleep(0)
         
-    async def handle_circ_flow_pid(self,data):
+    async def handle_press_pid(self,data):
         sp,kp,ki,kd = data
         self.sensor_data_array[SensorDataIndex.PRESSURESETPOINT] = sp
         self.sensor_data_array[SensorDataIndex.PRESSUREKP] = kp
@@ -159,13 +159,13 @@ class DataLogger:
         self.sensor_data_array[SensorDataIndex.PRESSUREKD] = kd
         await asyncio.sleep(0)
     
-    async def handle_press_pid(self,data):
+    async def handle_circ_flow_pid(self,data):
         sp,kp,ki,kd = data
         self.sensor_data_array[SensorDataIndex.OXYGENSETPOINT] = sp
         self.sensor_data_array[SensorDataIndex.OXYGENKP] = kp
         self.sensor_data_array[SensorDataIndex.OXYGENKI] = ki
         self.sensor_data_array[SensorDataIndex.OXYGENKD] = kd
-        
+        await asyncio.sleep(0)
         
     def _write_to_file(self):
         """Write the sensor data directly to the CSV file and refresh the SD card."""
