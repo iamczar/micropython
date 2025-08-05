@@ -1,6 +1,7 @@
 import uos
 import utime
 import uasyncio as asyncio
+import json
 from simple_logger import SimpleLogger
 from event_bus import EventBus
 import array
@@ -84,8 +85,9 @@ class DataLogger:
                     # Write sensor data to the file
                     self._write_to_file()
                     
-                # Publish sensor data to the event bus
-                await self.event_bus.publish("sensor-data", self.sensor_data_array)
+                # Output sensor data directly to USB_VCP via print()
+                self._output_sensor_data()
+                
             except Exception as e:
                 if self.logger:
                     self.logger.error(f"Error in logging loop: {e}")
@@ -217,6 +219,47 @@ class DataLogger:
 
         except Exception as e:
             self.logger.error(f"Error writing to log file: {e}")
+
+    def _output_sensor_data(self):
+        """Output sensor data directly to USB_VCP via print() in JSON format"""
+        try:
+            # Create JSON structure with named fields for better readability
+            sensor_json = {
+                "alpha_command": "sensor_data",
+                "message_source": "data_logger",
+                "module_id": str(self.module_id),
+                "timestamp": self._get_timestamp_for_filename(),
+                "data": {
+                    "state_id": self.sensor_data_array[SensorDataIndex.STATEID],
+                    "oxy_measured": self.sensor_data_array[SensorDataIndex.OXYMEASURED],
+                    "pressure_measured": self.sensor_data_array[SensorDataIndex.PRESSUREMEASURED],
+                    "flow_measured": self.sensor_data_array[SensorDataIndex.FLOWMEASURED],
+                    "temp_measured": self.sensor_data_array[SensorDataIndex.TEMPMEASURED],
+                    "circ_pump_speed": self.sensor_data_array[SensorDataIndex.CIRCPUMPSPEED],
+                    "pressure_pump_speed": self.sensor_data_array[SensorDataIndex.PRESSUREPUMPSPEED],
+                    "pressure_pid": self.sensor_data_array[SensorDataIndex.PRESSUREPID],
+                    "pressure_setpoint": self.sensor_data_array[SensorDataIndex.PRESSURESETPOINT],
+                    "pressure_kp": self.sensor_data_array[SensorDataIndex.PRESSUREKP],
+                    "pressure_ki": self.sensor_data_array[SensorDataIndex.PRESSUREKI],
+                    "pressure_kd": self.sensor_data_array[SensorDataIndex.PRESSUREKD],
+                    "oxygen_pid": self.sensor_data_array[SensorDataIndex.OXYGENPID],
+                    "oxygen_setpoint": self.sensor_data_array[SensorDataIndex.OXYGENSETPOINT],
+                    "oxygen_kp": self.sensor_data_array[SensorDataIndex.OXYGENKP],
+                    "oxygen_ki": self.sensor_data_array[SensorDataIndex.OXYGENKI],
+                    "oxygen_kd": self.sensor_data_array[SensorDataIndex.OXYGENKD],
+                    "oxygen_measured_1": self.sensor_data_array[SensorDataIndex.OXYGENMEASURED1],
+                    "oxygen_measured_2": self.sensor_data_array[SensorDataIndex.OXYGENMEASURED2],
+                    "oxygen_measured_3": self.sensor_data_array[SensorDataIndex.OXYGENMEASURED3],
+                    "oxygen_measured_4": self.sensor_data_array[SensorDataIndex.OXYGENMEASURED4]
+                }
+            }
+            
+            # Output to USB_VCP via print()
+            print(json.dumps(sensor_json))
+            
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error outputting sensor data: {e}")
 
     def close(self):
         """Ensure all data is written before shutting down."""
