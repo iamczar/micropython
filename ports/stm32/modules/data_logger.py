@@ -221,11 +221,14 @@ class DataLogger:
             self.logger.error(f"Error writing to log file: {e}")
 
     def _output_sensor_data(self):
-        """Output sensor data directly to USB_VCP via send_system_message in JSON format"""
+        """Output sensor data directly to USB_VCP via print() in JSON format"""
         try:
             # Create JSON structure with named fields for better readability
-            sensor_data = {
-                "command": "sensor_data",
+            sensor_json = {
+                "alpha_command": "sensor_data",
+                "message_source": "data_logger",
+                "module_id": str(self.module_id),
+                "timestamp": self._get_timestamp_for_filename(),
                 "data": {
                     "state_id": self.sensor_data_array[SensorDataIndex.STATEID],
                     "oxy_measured": self.sensor_data_array[SensorDataIndex.OXYMEASURED],
@@ -251,12 +254,8 @@ class DataLogger:
                 }
             }
             
-            # Output to USB_VCP via send_system_message
-            if self.logger:
-                self.logger.send_system_message("data_logger", sensor_data)
-            else:
-                # Fallback to print() if no logger available
-                print(json.dumps(sensor_data))
+            # Output to USB_VCP via print()
+            print(json.dumps(sensor_json))
             
         except Exception as e:
             if self.logger:

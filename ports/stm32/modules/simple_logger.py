@@ -28,6 +28,10 @@ class SimpleLogger:
         now = utime.localtime()
         return "{:04}-{:02}-{:02} {:02}:{:02}:{:02}".format(now[0], now[1], now[2], now[3], now[4], now[5])
 
+    def get_timestamp(self):
+        """Public method to get current timestamp"""
+        return self._get_timestamp()
+
     def _get_level_name(self, level):
         """Convert level number to name"""
         if level == self.DEBUG:
@@ -56,10 +60,9 @@ class SimpleLogger:
                 "level": self._get_level_name(level),
                 "message": msg
             }
+
+            print(json.dumps(log_json))
             
-            # Only print to console if not logging to file (to avoid USB_VCP spam)
-            if not self.log_to_file:
-                print(json.dumps(log_json))
             if self.log_to_file:
                 self._write_to_file(message)
 

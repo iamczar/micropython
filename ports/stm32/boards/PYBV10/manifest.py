@@ -21,4 +21,7 @@ freeze("$(PORT_DIR)/modules", "config.py")
 freeze("$(PORT_DIR)/modules", "event_bus.py")
 freeze("$(PORT_DIR)/modules", "simple_logger.py")
 
+# AlphaCommsManager (frozen Python module)
+freeze("$(PORT_DIR)/modules", "alphacommsmanager.py")
+
 
