@@ -218,17 +218,12 @@ class ReceivingSequenceState(State):
     async def _handle_sequence_line(self, command):
         """Handle individual sequence line"""
         try:
-            # Force garbage collection before processing large messages
-            import gc
-            gc.collect()
+            # Removed forced garbage collection to reduce overhead
             
             # command is already the inner message part, not the full JSON
             command_data = command if isinstance(command, dict) else json.loads(command)
             sequence_number = command_data.get("sequence_number")
             state_data = command_data.get("state", {})
-            
-            # Log memory status for debugging
-            self.logger.info(f"AlphaCommsManager: Processing sequence {sequence_number}, free memory: {gc.mem_free()}")
             
             self.logger.info(f"AlphaCommsManager: Received sequence state {sequence_number}")
             

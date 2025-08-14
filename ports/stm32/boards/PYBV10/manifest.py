@@ -24,4 +24,13 @@ freeze("$(PORT_DIR)/modules", "simple_logger.py")
 # AlphaCommsManager (frozen Python module)
 freeze("$(PORT_DIR)/modules", "alphacommsmanager.py")
 
+# Controllers and Actuators moved into firmware (flat)
+freeze("$(PORT_DIR)/modules", "command_data_structure.py")
+freeze("$(PORT_DIR)/modules", "pressure_controller.py")
+freeze("$(PORT_DIR)/modules", "circ_flow_controller.py")
+freeze("$(PORT_DIR)/modules", "valve.py")
+freeze("$(PORT_DIR)/modules", "valve_and_air_pump_actuator.py")
+freeze("$(PORT_DIR)/modules", "tca9535.py")
+freeze("$(PORT_DIR)/modules", "tca9535_settings.py")
+freeze("$(PORT_DIR)/modules", "pid.py")
 
