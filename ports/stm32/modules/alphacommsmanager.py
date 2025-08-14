@@ -73,7 +73,7 @@ class IdleState(State):
             if command == "sequence_cmd":
                 await self.context._transition_to_state("waiting_for_sequence")
                 await self.context.states["waiting_for_sequence"].handle_message(message)
-            elif command in ["stop", "pause", "resume", "start_data_log", "stop_data_log", "retrieve_data"]:
+            elif command in ["stop", "pause", "resume", "reset", "start_data_log", "stop_data_log", "retrieve_data"]:
                 await self.context.handle_command(json.dumps(inner_message), command)
             else:
                 self.logger.warning(f"AlphaCommsManager: Unknown command in idle state: {command}")
@@ -791,6 +791,21 @@ class AlphaCommsManager:
             await self.send_status(ack_response)
             
             self.logger.info(f"AlphaCommsManager: {command_type.upper()} command acknowledged")
+            
+            # Fan-out to on-device components via EventBus
+            try:
+                if self.event_bus:
+                    topic_map = {
+                        "stop": "stop-cmd",
+                        "pause": "pause-cmd",
+                        "resume": "resume-cmd",
+                        "reset": "reset-cmd",
+                    }
+                    topic = topic_map.get(command_type)
+                    if topic:
+                        await self.event_bus.publish(topic, True)
+            except Exception as pub_e:
+                self.logger.error(f"AlphaCommsManager: Error publishing {command_type} to event bus: {pub_e}")
             
         except Exception as e:
             self.logger.error(f"AlphaCommsManager: Error handling {command_type} command: {e}")
