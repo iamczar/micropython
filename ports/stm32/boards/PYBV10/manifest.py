@@ -34,3 +34,6 @@ freeze("$(PORT_DIR)/modules", "tca9535.py")
 freeze("$(PORT_DIR)/modules", "tca9535_settings.py")
 freeze("$(PORT_DIR)/modules", "pid.py")
 
+# Sensors moved into firmware
+freeze("$(PORT_DIR)/modules", "file_storage_sensor.py")
+
