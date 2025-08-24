@@ -107,12 +107,13 @@ class AutoSamplerCmds:
         self.id: int = 0
         self.cmd: int = 0
         self.hold_time_hrs: int = 0
+        self.delay_seconds: int = 0  # For delayed run commands
         
     def pack(self):
-        fmt = "3i"  # 3 integers
-        return struct.pack(fmt, self.id, self.cmd, self.hold_time_hrs)
+        fmt = "4i"  # 4 integers
+        return struct.pack(fmt, self.id, self.cmd, self.hold_time_hrs, self.delay_seconds)
 
     def unpack(self, data):
-        fmt = "3i"
+        fmt = "4i"
         unpacked_data = struct.unpack(fmt, data)
-        (self.id, self.cmd, self.hold_time_hrs) = unpacked_data
+        (self.id, self.cmd, self.hold_time_hrs, self.delay_seconds) = unpacked_data

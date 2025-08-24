@@ -658,13 +658,45 @@ class AlphaCommsManager:
                 if self.check_connection():
                     message = self.receive_message()
                     if message:
-                        await self.current_state_object.handle_message(message)
+                        # Pre-route auto sampler commands
+                        try:
+                            msg_data = json.loads(message)
+                            inner = msg_data.get("message", {}) if isinstance(msg_data, dict) else {}
+                            # Support explicit command type
+                            if isinstance(inner, dict) and inner.get("command") == "auto_sampler_cmd":
+                                await self._route_auto_sampler_command(inner)
+                            else:
+                                # Let state machine handle the rest (sequence, stop/pause/resume, etc.)
+                                await self.current_state_object.handle_message(message)
+                        except Exception as route_e:
+                            self.logger.error(f"AlphaCommsManager: Routing error: {route_e}")
                 
                 await asyncio.sleep(0.1)  # 100ms delay
                 
             except Exception as e:
                 self.logger.error(f"AlphaCommsManager: Error in communication loop: {e}")
                 await asyncio.sleep(1.0)  # Longer delay on error
+
+    async def _route_auto_sampler_command(self, inner_message: dict):
+        """Route auto sampler command to the appropriate internal topic."""
+        try:
+            sampler_id = inner_message.get("sampler_id")
+            if sampler_id not in (1, 2, 3):
+                self.logger.error("AlphaCommsManager: auto_sampler_cmd missing/invalid sampler_id")
+                return
+            cmd = inner_message.get("cmd")
+            hold_time = inner_message.get("hold_time", 0)
+            delay_seconds = inner_message.get("delay_seconds", 0)
+            topic = f"auto-sampler-{int(sampler_id)}-cmds"
+            payload = {"cmd": cmd, "hold_time": hold_time, "delay_seconds": delay_seconds}
+            if self.event_bus:
+                await self.event_bus.publish(topic, payload)
+                # Ack back to host
+                ack = {"command": "auto_sampler_cmd_ack", "sampler_id": int(sampler_id), "status": "dispatched"}
+                self.logger.send_system_message("alpha_comms_manager", ack)
+                self.logger.info(f"AlphaCommsManager: Dispatched auto sampler cmd to {topic}")
+        except Exception as e:
+            self.logger.error(f"AlphaCommsManager: Error routing auto sampler command: {e}")
     
     def receive_message(self) -> str:
         """

@@ -7,6 +7,7 @@ freeze("$(PORT_DIR)/modules", "tmc2240.py")
 freeze("$(PORT_DIR)/modules", "stepper_motor_uart.py")
 
 freeze("$(PORT_DIR)/modules", "i2c_wrapper.py")
+freeze("$(PORT_DIR)/modules", "spi_wrapper.py")
 freeze("$(PORT_DIR)/modules", "slf3c_1300f.py")
 freeze("$(PORT_DIR)/modules", "tempflow_sensor.py")
 
@@ -33,6 +34,9 @@ freeze("$(PORT_DIR)/modules", "valve_and_air_pump_actuator.py")
 freeze("$(PORT_DIR)/modules", "tca9535.py")
 freeze("$(PORT_DIR)/modules", "tca9535_settings.py")
 freeze("$(PORT_DIR)/modules", "pid.py")
+
+# Controllers moved into firmware
+freeze("$(PORT_DIR)/modules", "sequence_controller.py")
 
 # Sensors moved into firmware
 freeze("$(PORT_DIR)/modules", "file_storage_sensor.py")
