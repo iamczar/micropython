@@ -686,9 +686,8 @@ class AlphaCommsManager:
                 return
             cmd = inner_message.get("cmd")
             hold_time = inner_message.get("hold_time", 0)
-            delay_seconds = inner_message.get("delay_seconds", 0)
             topic = f"auto-sampler-{int(sampler_id)}-cmds"
-            payload = {"cmd": cmd, "hold_time": hold_time, "delay_seconds": delay_seconds}
+            payload = {"cmd": cmd, "hold_time": hold_time}
             if self.event_bus:
                 await self.event_bus.publish(topic, payload)
                 # Ack back to host

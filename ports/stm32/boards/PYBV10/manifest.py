@@ -41,3 +41,6 @@ freeze("$(PORT_DIR)/modules", "sequence_controller.py")
 # Sensors moved into firmware
 freeze("$(PORT_DIR)/modules", "file_storage_sensor.py")
 
+# Auto Sampler module
+freeze("$(PORT_DIR)/modules", "auto_sampler.py")
+
