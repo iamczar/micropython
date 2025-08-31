@@ -87,6 +87,12 @@ class DataLogger:
                     
                 # Output sensor data directly to USB_VCP via print()
                 self._output_sensor_data()
+                # Continuously notify host of logging state (enabled/disabled)
+                try:
+                    if self.logger:
+                        self.logger.send_system_message("data_logger", {"event": "logging_state", "active": True if self.log_active else False})
+                except Exception:
+                    pass
                 
             except Exception as e:
                 if self.logger:
