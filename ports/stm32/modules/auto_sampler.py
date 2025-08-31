@@ -9,13 +9,11 @@ class AutoSamplerCmd:
     STOP = 0
     RESET = 1
     RUN = 2
-    DELAYED_RUN = 3
     
     _cmd_map = {
         STOP: "STOP",
         RESET: "RESET",
         RUN: "RUN",
-        DELAYED_RUN: "DELAYED_RUN",
     }
 
     @classmethod
@@ -142,54 +140,13 @@ class WaitingForCommandState(AutoSamplerState):
             else:
                 await self.context.publish_error("Not at home position for RUN, need RESET first")
                 
-        elif cmd == AutoSamplerCmd.DELAYED_RUN:
-            # Setup delayed run parameters
-            self.context.hold_time_secs = data.get('hold_time', 0) * 3600
-            self.context.delayed_run_delay_secs = data.get('delay_seconds', 0)
-            await self.context.transition_to_state("delayed_run_waiting")
+        # DELAYED_RUN removed
             
         else:
             self.logger.warning(f"Sampler {self.context.sampler_id}: Unknown command {cmd}")
 
 
-class DelayedRunWaitingState(AutoSamplerState):
-    """Waiting for delay period to complete before starting run"""
-    
-    async def enter(self):
-        await super().enter()
-        self.start_time = time.time()
-        self.last_log_time = 0
-        self.logger.info(f"Sampler {self.context.sampler_id}: Starting {self.context.delayed_run_delay_secs}s delay")
-        await self.context.publish_status("delayed_run_waiting", 
-                                         f"Waiting {self.context.delayed_run_delay_secs}s before run")
-    
-    async def update(self):
-        """Check if delay period has elapsed"""
-        elapsed_time = time.time() - self.start_time
-        remaining_time = self.context.delayed_run_delay_secs - elapsed_time
-        
-        # Emit remaining time every 1 second via system message so host can display countdown
-        if int(elapsed_time) - self.last_log_time >= 1:
-            self.last_log_time = int(elapsed_time)
-            await self.context.publish_status("delayed_run_waiting", f"{remaining_time:.1f}s remaining")
-        
-        # Check if delay is complete
-        if elapsed_time >= self.context.delayed_run_delay_secs:
-            self.logger.info(f"Sampler {self.context.sampler_id}: Delay complete, starting run")
-            if self.context.current_sensor_state == AutoSamplerSensorState.home:
-                await self.context.transition_to_state("moving_to_bottom_run")
-            else:
-                await self.context.publish_error("Not at home position after delay, need RESET")
-                await self.context.transition_to_state("waiting_for_command")
-    
-    async def handle_command(self, cmd, data):
-        """Handle commands during delay (only STOP and RESET allowed)"""
-        if cmd == AutoSamplerCmd.STOP:
-            await self.context.transition_to_state("stopped")
-        elif cmd == AutoSamplerCmd.RESET:
-            await self.context.transition_to_state("moving_to_bottom_reset")
-        else:
-            self.logger.warning(f"Sampler {self.context.sampler_id}: Command {AutoSamplerCmd.to_string(cmd)} ignored during delay")
+# DelayedRunWaitingState removed (feature deprecated)
 
 
 class MovingToBottomResetState(AutoSamplerState):
@@ -460,13 +417,12 @@ class AutoSamplerV2:
         
         # Operation parameters
         self.hold_time_secs = 0
-        self.delayed_run_delay_secs = 0
+        # delayed run removed
         
         # Initialize states
         self.states = {
             "power_on": PowerOnState(self),
             "waiting_for_command": WaitingForCommandState(self),
-            "delayed_run_waiting": DelayedRunWaitingState(self),
             "moving_to_bottom_reset": MovingToBottomResetState(self),
             "moving_to_bottom_run": MovingToBottomRunState(self),
             "holding_position": HoldingPositionState(self),
