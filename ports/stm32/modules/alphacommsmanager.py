@@ -827,14 +827,20 @@ class AlphaCommsManager:
             # Fan-out to on-device components via EventBus
             try:
                 if self.event_bus:
-                    topic_map = {
+                    # Control state machine
+                    topic_map_bool_true = {
                         "stop": "stop-cmd",
                         "pause": "pause-cmd",
                         "resume": "resume-cmd",
                     }
-                    topic = topic_map.get(command_type)
+                    topic = topic_map_bool_true.get(command_type)
                     if topic:
                         await self.event_bus.publish(topic, True)
+                    # Data logger control
+                    if command_type == "start_data_log":
+                        await self.event_bus.publish("data-log-cmd", True)
+                    elif command_type == "stop_data_log":
+                        await self.event_bus.publish("data-log-cmd", False)
             except Exception as pub_e:
                 self.logger.error(f"AlphaCommsManager: Error publishing {command_type} to event bus: {pub_e}")
             
