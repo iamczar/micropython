@@ -73,7 +73,7 @@ class IdleState(State):
             if command == "sequence_cmd":
                 await self.context._transition_to_state("waiting_for_sequence")
                 await self.context.states["waiting_for_sequence"].handle_message(message)
-            elif command in ["stop", "pause", "resume", "start_data_log", "stop_data_log", "retrieve_data"]:
+            elif command in ["stop", "pause", "resume", "start_data_log", "stop_data_log", "retrieve_data", "clear_session_logs"]:
                 await self.context.handle_command(json.dumps(inner_message), command)
             else:
                 self.logger.warning(f"AlphaCommsManager: Unknown command in idle state: {command}")
@@ -840,6 +840,9 @@ class AlphaCommsManager:
                         await self.event_bus.publish("data-log-cmd", True)
                     elif command_type == "stop_data_log":
                         await self.event_bus.publish("data-log-cmd", False)
+                    elif command_type == "clear_session_logs":
+                        # Delegate cleanup to DataLogger to avoid race conditions
+                        await self.event_bus.publish("data-log-maintenance-cmd", {"action": "clear_session_logs"})
             except Exception as pub_e:
                 self.logger.error(f"AlphaCommsManager: Error publishing {command_type} to event bus: {pub_e}")
             

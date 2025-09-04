@@ -24,6 +24,7 @@ class FileStorageSensor:
         self.path_fallback = "/"
         # Default: every 5 seconds
         self.interval_s = 1.0 / loop_hz if loop_hz and loop_hz > 0 else 5.0
+        # Cleanup delegated to DataLogger; no commands subscribed here
 
     def _choose_mount(self) -> str:
         try:
@@ -48,6 +49,7 @@ class FileStorageSensor:
             if self.logger:
                 self.logger.error(f"FileStorageSensor: statvfs failed for {path}: {e}")
             return 0, 0
+
 
     async def sensor_loop(self):
         while True:

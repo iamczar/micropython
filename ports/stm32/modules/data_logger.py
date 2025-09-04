@@ -58,6 +58,8 @@ class DataLogger:
                
         # Subscribe to the data-logger-actuator to start/stop logging
         self.subscribe_to_topic("data-log-cmd", self.handle_event_datalogger)
+        # Maintenance commands (e.g., clear_session_logs)
+        self.subscribe_to_topic("data-log-maintenance-cmd", self.handle_maintenance_cmd)
 
         if self.logger:
             self.logger.info("DataLogger initialized")
@@ -117,6 +119,45 @@ class DataLogger:
         except Exception as e:
             if self.logger:
                 self.logger.error(f"Error in handle_event_datalogger: {e}")
+        await asyncio.sleep(0)
+
+    async def handle_maintenance_cmd(self, data):
+        """Handle maintenance commands such as clearing session logs safely."""
+        try:
+            action = None
+            if isinstance(data, dict):
+                action = data.get("action")
+            if action == "clear_session_logs":
+                # Pause logging while we clean up to avoid race conditions
+                was_active = self.log_active
+                if was_active:
+                    self.log_active = False
+                    self.close()
+                try:
+                    directory = '/sd/session_logs/'
+                    try:
+                        files = uos.listdir(directory)
+                    except Exception:
+                        files = []
+                    for name in files:
+                        path = f"{directory}{name}"
+                        try:
+                            uos.remove(path)
+                        except Exception:
+                            pass
+                    # Emit a simple info line via logger if available
+                    if self.logger:
+                        try:
+                            self.logger.send_system_message("data_logger", {"event": "logs_cleared"})
+                        except Exception:
+                            pass
+                finally:
+                    # Resume logging if it was active
+                    if was_active:
+                        self.log_active = True
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error in handle_maintenance_cmd: {e}")
         await asyncio.sleep(0)
 
     async def handle_event_oxy1(self, data):
