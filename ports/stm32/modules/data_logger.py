@@ -121,6 +121,34 @@ class DataLogger:
                 self.logger.error(f"Error in handle_event_datalogger: {e}")
         await asyncio.sleep(0)
 
+    def _rm_tree(self, path: str) -> int:
+        """Recursively delete a directory tree. Returns number of files/dirs removed."""
+        removed = 0
+        try:
+            entries = []
+            try:
+                entries = uos.listdir(path)
+            except Exception:
+                entries = []
+            for name in entries:
+                child = f"{path}/{name}"
+                try:
+                    uos.remove(child)
+                    removed += 1
+                except Exception:
+                    try:
+                        removed += self._rm_tree(child)
+                    except Exception:
+                        pass
+            try:
+                uos.rmdir(path)
+                removed += 1
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return removed
+
     async def handle_maintenance_cmd(self, data):
         """Handle maintenance commands such as clearing session logs safely."""
         try:
@@ -128,29 +156,100 @@ class DataLogger:
             if isinstance(data, dict):
                 action = data.get("action")
             if action == "clear_session_logs":
+                # Signal immediately that we received the maintenance command
+                try:
+                    if self.logger:
+                        self.logger.send_system_message("data_logger_ack", {
+                            "event": "maintenance_entered",
+                            "action": "clear_session_logs"
+                        })
+                except Exception:
+                    pass
                 # Pause logging while we clean up to avoid race conditions
                 was_active = self.log_active
                 if was_active:
                     self.log_active = False
                     self.close()
                 try:
-                    directory = '/sd/session_logs/'
+                    directory = '/sd/session_logs'
+                    # Ensure directory exists, then remove files inside
+                    try:
+                        uos.mkdir(directory)
+                    except Exception:
+                        pass
                     try:
                         files = uos.listdir(directory)
                     except Exception:
                         files = []
+                    try:
+                        if self.logger:
+                            self.logger.send_system_message("data_logger_ack", {
+                                "event": "maintenance_scan",
+                                "path": directory,
+                                "files_found": len(files),
+                                "entries": files[:10]
+                            })
+                    except Exception:
+                        pass
+                    deleted = 0
                     for name in files:
-                        path = f"{directory}{name}"
+                        path = f"{directory}/{name}"
                         try:
                             uos.remove(path)
+                            deleted += 1
                         except Exception:
-                            pass
+                            # If not a file, try directory tree removal
+                            removed_dir = 0
+                            try:
+                                removed_dir = self._rm_tree(path)
+                                deleted += removed_dir
+                            except Exception:
+                                pass
+                            if removed_dir == 0:
+                                # Report failure and continue
+                                try:
+                                    if self.logger:
+                                        self.logger.send_system_message("data_logger_ack", {
+                                            "event": "delete_failed",
+                                            "file": name
+                                        })
+                                except Exception:
+                                    pass
+                    # Best-effort sweep: remove any leftover entries by deleting the directory tree
+                    extra_removed = 0
+                    try:
+                        extra_removed = self._rm_tree(directory)
+                    except Exception:
+                        pass
+                    # Recreate directory to ensure future logging works
+                    try:
+                        uos.mkdir(directory)
+                    except Exception:
+                        pass
+                    # Compute remaining files after deletion
+                    try:
+                        remaining = len(uos.listdir(directory))
+                    except Exception:
+                        remaining = 0
+                    # Reset filename so a fresh logfile is created on next write
+                    self.filename = None
                     # Emit a simple info line via logger if available
                     if self.logger:
                         try:
-                            self.logger.send_system_message("data_logger", {"event": "logs_cleared"})
+                            self.logger.send_system_message("data_logger_ack", {
+                                "event": "logs_cleared",
+                                "deleted": deleted + extra_removed,
+                                "remaining": remaining,
+                                "path": directory
+                            })
                         except Exception:
                             pass
+                    # Nudge the storage sensor to emit an immediate status update
+                    try:
+                        if self.event_bus:
+                            await self.event_bus.publish("file-storage-cmd", {"action": "emit_status"})
+                    except Exception:
+                        pass
                 finally:
                     # Resume logging if it was active
                     if was_active:

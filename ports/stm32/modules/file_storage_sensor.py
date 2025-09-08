@@ -24,7 +24,12 @@ class FileStorageSensor:
         self.path_fallback = "/"
         # Default: every 5 seconds
         self.interval_s = 1.0 / loop_hz if loop_hz and loop_hz > 0 else 5.0
-        # Cleanup delegated to DataLogger; no commands subscribed here
+        # Listen for explicit status emit requests (e.g., after cleanup)
+        try:
+            if self.event_bus:
+                self.event_bus.subscribe("file-storage-cmd", self._on_cmd)
+        except Exception:
+            pass
 
     def _choose_mount(self) -> str:
         try:
@@ -77,4 +82,31 @@ class FileStorageSensor:
                     self.logger.error(f"FileStorageSensor: loop error: {e}")
             await asyncio.sleep(self.interval_s)
 
+
+    async def _on_cmd(self, data):
+        try:
+            action = None
+            if isinstance(data, dict):
+                action = data.get("action")
+            if action == "emit_status":
+                # Emit immediately
+                path = self._choose_mount()
+                total, free = self._stat_storage(path)
+                used = total - free if total >= free else 0
+                free_percent = (free / total * 100.0) if total > 0 else 0.0
+                payload = {
+                    "event": "storage-status",
+                    "path": path,
+                    "total_bytes": int(total),
+                    "free_bytes": int(free),
+                    "used_bytes": int(used),
+                    "free_percent": float(free_percent),
+                }
+                if self.logger:
+                    try:
+                        self.logger.send_system_message("file_storage_sensor", payload)
+                    except Exception:
+                        self.logger.info(f"FileStorageSensor: {payload}")
+        except Exception:
+            pass
 
