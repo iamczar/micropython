@@ -64,11 +64,18 @@ class LoadingState(State):
             await self.context._transition("error")
             return
         self.context._load_current_sequence_number()
-        # If already complete, mark completed; otherwise start
-        if self.context.current_sequence_number >= self.context.total_sequences:
-            await self.context._transition("completed")
-        else:
-            await self.context._transition("executing")
+        # Validate content and progress
+        total = int(self.context.total_sequences)
+        if total <= 0:
+            self.logger.error("SequenceController: Loaded sequence has 0 lines")
+            await self.context._transition("error")
+            return
+        if int(self.context.current_sequence_number) >= total:
+            # If progress says we're at/past the end, reset to start
+            self.logger.info("SequenceController: Progress at end; resetting to 0 and executing")
+            self.context.current_sequence_number = 0
+        # Always proceed to executing after a successful load
+        await self.context._transition("executing")
 
     async def on_stop(self):
         await self.context._transition("idle")
@@ -85,6 +92,12 @@ class ExecutingState(State):
             "total_sequences": int(self.context.total_sequences),
         })
         self.context.is_running = True
+        # Start data logging when execution begins
+        try:
+            if self.context.event_bus:
+                await self.context.event_bus.publish("data-log-cmd", True)
+        except Exception:
+            pass
         # Kick off execution loop
         self._task = asyncio.create_task(self._execution_loop())
 
@@ -105,8 +118,8 @@ class ExecutingState(State):
                 if not isinstance(self.context.state, ExecutingState):
                     return
 
-                # If not currently holding, dispatch the current line
-                if self.context._hold_remaining_ms <= 0:
+                # If not currently holding, dispatch the current line (only once)
+                if self.context._hold_remaining_ms <= 0 and not self.context._line_dispatched:
                     data = self.context.sequence_data[self.context.current_sequence_number]
                     ok = self.context._execute_sequence_line(data)
                     if not ok:
@@ -120,25 +133,53 @@ class ExecutingState(State):
                         trans_time = self.context.execution_delay
                     self.context._hold_remaining_ms = int(trans_time * 1000)
                     # Set an absolute deadline to make heartbeats consistent
-                    self.context._hold_until_ms = utime.ticks_add(utime.ticks_ms(), self.context._hold_remaining_ms)
+                    now_ms = utime.ticks_ms()
+                    self.context._hold_until_ms = utime.ticks_add(now_ms, self.context._hold_remaining_ms)
+                    self.context._line_dispatched = True
 
                 # Hold in small chunks to be responsive to pause
-                sleep_ms = 100 if self.context._hold_remaining_ms > 100 else self.context._hold_remaining_ms
+                # Use deadline to compute remaining; sleep in small chunks to stay responsive
+                if self.context._hold_until_ms:
+                    remaining = utime.ticks_diff(self.context._hold_until_ms, utime.ticks_ms())
+                else:
+                    remaining = self.context._hold_remaining_ms
+                sleep_ms = 100 if remaining > 100 else remaining
                 if sleep_ms > 0:
                     await asyncio.sleep(sleep_ms / 1000.0)
                     # If state changed (e.g., paused), leave remaining hold as-is
                     if not isinstance(self.context.state, ExecutingState):
                         return
-                    self.context._hold_remaining_ms -= sleep_ms
-                else:
-                    # Done holding for this line; advance
+                    # Recompute remaining based on deadline for accuracy
+                    if self.context._hold_until_ms:
+                        remaining = utime.ticks_diff(self.context._hold_until_ms, utime.ticks_ms())
+                        self.context._hold_remaining_ms = int(remaining) if remaining > 0 else 0
+                    else:
+                        self.context._hold_remaining_ms -= sleep_ms
+                elif self.context._hold_remaining_ms <= 0:
+                    # Done holding for this line
+                    if self.context.current_sequence_number == max(self.context.total_sequences - 1, 0):
+                        # Final line executed: emit a one-time 'executed' notification and hold
+                        if not self.context._final_line_executed_sent:
+                            try:
+                                self.context._send_system({
+                                    "event": "executed",
+                                    "sequence": int(self.context.current_sequence_number),
+                                    "total_sequences": int(self.context.total_sequences),
+                                })
+                            except Exception:
+                                pass
+                            self.context._final_line_executed_sent = True
+                        self.context._hold_remaining_ms = 0
+                        self.context._hold_until_ms = 0
+                        self.context._line_dispatched = True
+                        await asyncio.sleep(0.1)
+                        continue
+                    # Otherwise advance to next line
                     self.context._hold_remaining_ms = 0
                     self.context._hold_until_ms = 0
+                    self.context._line_dispatched = False
                     self.context.current_sequence_number += 1
                     self.context._save_current_sequence_number()
-                    if self.context.current_sequence_number >= self.context.total_sequences:
-                        await self.context._transition("completed")
-                        return
                 await asyncio.sleep(0)
         except Exception as e:
             try:
@@ -164,14 +205,7 @@ class PausedState(State):
         await self.context._transition("idle")
 
 
-class CompletedState(State):
-    async def enter(self):
-        self.context.is_running = False
-        await self.context._send_state("completed", {
-            "total_sequences": int(self.context.total_sequences)
-        })
-        # Transition to idle ready for next run
-        await self.context._transition("idle")
+ 
 
 
 class ErrorState(State):
@@ -214,6 +248,10 @@ class SequenceController:
         # Remaining hold time for current line (milliseconds)
         self._hold_remaining_ms = 0
         self._hold_until_ms = 0
+        # Whether current line has been dispatched (to avoid re-dispatch)
+        self._line_dispatched = False
+        # Whether we've notified that the final line executed
+        self._final_line_executed_sent = False
 
         # Init FS
         self._init_fs()
@@ -224,7 +262,6 @@ class SequenceController:
             "loading": LoadingState(self),
             "executing": ExecutingState(self),
             "paused": PausedState(self),
-            "completed": CompletedState(self),
             "error": ErrorState(self),
         }
         self.state: State = self.states["idle"]
@@ -239,12 +276,12 @@ class SequenceController:
 
     # ------------- Event bus wiring -------------
     def _subscribe(self):
-        self.event_bus.subscribe("sequence-complete", self._on_sequence_complete)
+        self.event_bus.subscribe("sequence_transfer_complete", self._on_sequence_transfer_complete)
         self.event_bus.subscribe("stop-cmd", self.handle_stop_command)
         self.event_bus.subscribe("pause-cmd", self.handle_pause_command)
         self.event_bus.subscribe("resume-cmd", self.handle_resume_command)
 
-    async def _on_sequence_complete(self, data):
+    async def _on_sequence_transfer_complete(self, data):
         # Clear progress and start a new execution automatically
         try:
             uos.remove(self.state_file_path)
@@ -297,6 +334,16 @@ class SequenceController:
         if method_name == "on_stop":
             try:
                 self._publish_zero_commands()
+            except Exception:
+                pass
+            # Reset any in-flight timing so UI shows no remaining hold
+            self._hold_remaining_ms = 0
+            self._hold_until_ms = 0
+            self._line_dispatched = False
+            # Stop data logging on stop
+            try:
+                if self.event_bus:
+                    await self.event_bus.publish("data-log-cmd", False)
             except Exception:
                 pass
             await self._transition("idle")
@@ -361,8 +408,8 @@ class SequenceController:
                 # Recompute remaining ms based on deadline if available
                 if getattr(self, "_hold_until_ms", 0) and isinstance(self.state, ExecutingState):
                     now_ms = utime.ticks_ms()
-                    remaining = int(self._hold_until_ms - now_ms)
-                    self._hold_remaining_ms = remaining if remaining > 0 else 0
+                    remaining = utime.ticks_diff(self._hold_until_ms, now_ms)
+                    self._hold_remaining_ms = int(remaining) if remaining > 0 else 0
                 await self._send_state(state_name, {})
             except Exception:
                 pass
@@ -417,18 +464,28 @@ class SequenceController:
     # ------------- Command publishing -------------
     def _publish_zero_commands(self):
         try:
+            # Oxy pump: zero speed only; preserve all other fields from last command if available
             oxy = OxyPumpCmds()
             oxy.circFlowSpeed = 0
-            oxy.oxySP = oxy.oxyKp = oxy.oxyKi = oxy.oxyKd = 0.0
-            oxy.pump1dir = 0
-            oxy.tube_bore = 1
-            oxy.pump_2_speed_ratio = 0.0
+            if self._last_oxy_cmd is not None:
+                oxy.oxySP = float(self._last_oxy_cmd.oxySP)
+                oxy.oxyKp = float(self._last_oxy_cmd.oxyKp)
+                oxy.oxyKi = float(self._last_oxy_cmd.oxyKi)
+                oxy.oxyKd = float(self._last_oxy_cmd.oxyKd)
+                oxy.pump1dir = int(self._last_oxy_cmd.pump1dir)
+                oxy.tube_bore = int(self._last_oxy_cmd.tube_bore)
+                oxy.pump_2_speed_ratio = float(self._last_oxy_cmd.pump_2_speed_ratio)
 
+            # Pressure pump: zero speed only; preserve all other fields from last command if available
             pres = PressurePumpCmds()
             pres.pressureFlowSpeed = 0
-            pres.pressureSP = pres.pressureKp = pres.pressureKi = pres.pressureKd = 0.0
-            pres.pump2dir = 0
-            pres.tube_bore = 1
+            if self._last_pressure_cmd is not None:
+                pres.pressureSP = float(self._last_pressure_cmd.pressureSP)
+                pres.pressureKp = float(self._last_pressure_cmd.pressureKp)
+                pres.pressureKi = float(self._last_pressure_cmd.pressureKi)
+                pres.pressureKd = float(self._last_pressure_cmd.pressureKd)
+                pres.pump2dir = int(self._last_pressure_cmd.pump2dir)
+                pres.tube_bore = int(self._last_pressure_cmd.tube_bore)
 
             va = ValveAndAirPumpCmds()
             for idx in range(1, 10 + 1):
@@ -475,7 +532,7 @@ class SequenceController:
                 asyncio.create_task(self.event_bus.publish("pressure-pump-cmd", pres.pack()))
         except Exception:
             pass
-
+    
     def _execute_sequence_line(self, sequence_data: dict) -> bool:
         try:
             seq_num = sequence_data.get("sequence_number")

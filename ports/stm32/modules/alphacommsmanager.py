@@ -785,9 +785,9 @@ class AlphaCommsManager:
             # Reset retry counters
             self._reset_sequence_retry()
             
-            # Publish completion event if event bus is available
+            # Publish transfer completion event if event bus is available
             if self.event_bus:
-                await self.event_bus.publish("sequence-complete", {
+                await self.event_bus.publish("sequence_transfer_complete", {
                     "file_path": self.jsonl_file_path,
                     "total_sequences": total_sequences
                 })
