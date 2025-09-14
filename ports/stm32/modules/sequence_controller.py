@@ -381,11 +381,23 @@ class SequenceController:
 
     async def _send_state(self, name: str, payload: dict):
         try:
+            # Present current_sequence as 1-based for UI clarity, clamped to total_sequences
+            try:
+                reported_current = int(self.current_sequence_number)
+                reported_total = int(self.total_sequences)
+                if reported_total > 0:
+                    reported_current = min(reported_current + 1, reported_total)
+                else:
+                    reported_current = 0
+            except Exception:
+                reported_current = int(self.current_sequence_number)
+                reported_total = int(self.total_sequences)
+
             out = {
                 "event": "status",
                 "state": name,
-                "current_sequence": int(self.current_sequence_number),
-                "total_sequences": int(self.total_sequences),
+                "current_sequence": reported_current,
+                "total_sequences": reported_total,
                 "is_running": bool(self.is_running),
                 # Report remaining hold time in seconds only
                 "hold_remaining_sec": int((self._hold_remaining_ms or 0) / 1000),

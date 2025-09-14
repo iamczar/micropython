@@ -73,7 +73,7 @@ class IdleState(State):
             if command == "sequence_cmd":
                 await self.context._transition_to_state("waiting_for_sequence")
                 await self.context.states["waiting_for_sequence"].handle_message(message)
-            elif command in ["stop", "pause", "resume", "start_data_log", "stop_data_log", "retrieve_data", "clear_session_logs"]:
+            elif command in ["stop", "pause", "resume", "start_data_log", "stop_data_log", "retrieve_data", "clear_session_logs", "pid_cmd"]:
                 await self.context.handle_command(json.dumps(inner_message), command)
             else:
                 self.logger.warning(f"AlphaCommsManager: Unknown command in idle state: {command}")
@@ -835,6 +835,23 @@ class AlphaCommsManager:
                     topic = topic_map_bool_true.get(command_type)
                     if topic:
                         await self.event_bus.publish(topic, True)
+                    # PID commands: route to controllers
+                    if command_type == "pid_cmd":
+                        try:
+                            msg = json.loads(command) if isinstance(command, str) else {}
+                        except Exception:
+                            msg = {}
+                        payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else msg
+                        if isinstance(payload, dict):
+                            t = str(payload.get("type", "")).lower()
+                            if t == "flow_pid":
+                                await self.event_bus.publish("pid-circ-flow-controller", payload)
+                            elif t == "pressure_pid":
+                                await self.event_bus.publish("pid-pressure-controller", payload)
+                            elif t == "flow_pid_enable":
+                                await self.event_bus.publish("pid-circ-flow-controller", payload)
+                            elif t == "pressure_pid_enable":
+                                await self.event_bus.publish("pid-pressure-controller", payload)
                     # Data logger control
                     if command_type == "start_data_log":
                         await self.event_bus.publish("data-log-cmd", True)
@@ -848,30 +865,6 @@ class AlphaCommsManager:
             
         except Exception as e:
             self.logger.error(f"AlphaCommsManager: Error handling {command_type} command: {e}")
-    
-    async def handle_stop_command(self, command: str):
-        """Handle stop command"""
-        await self.handle_command(command, "stop")
-    
-    async def handle_pause_command(self, command: str):
-        """Handle pause command"""
-        await self.handle_command(command, "pause")
-    
-    async def handle_resume_command(self, command: str):
-        """Handle resume command"""
-        await self.handle_command(command, "resume")
-    
-    async def handle_start_data_log_command(self, command: str):
-        """Handle start data log command"""
-        await self.handle_command(command, "start_data_log")
-    
-    async def handle_stop_data_log_command(self, command: str):
-        """Handle stop data log command"""
-        await self.handle_command(command, "stop_data_log")
-    
-    async def handle_retrieve_data_command(self, command: str):
-        """Handle retrieve data command"""
-        await self.handle_command(command, "retrieve_data")
     
     def _check_sequence_retry_timeout(self):
         """

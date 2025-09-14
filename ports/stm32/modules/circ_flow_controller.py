@@ -54,7 +54,16 @@ class CircFlowController:
         self.subscribe_to_topic(oxy_sensor_topic, self.handle_event_oxy)
 
         self.subscribe_to_topic("oxy-pump-cmds", self.handle_oxy_pump_cmds)
+        # PID control messages from AlphaCommsManager
+        self.subscribe_to_topic("pid-circ-flow-controller", self.handle_pid_cmd)
         self.logger.info("CircFlowController Initilised")
+
+        # Start PID status heartbeat
+        try:
+            import uasyncio as asyncio
+            asyncio.create_task(self._pid_status_loop())
+        except Exception:
+            pass
 
     def subscribe_to_topic(self, topic, handler=None):
         """Subscribe to a topic to receive sensor data."""
@@ -126,4 +135,53 @@ class CircFlowController:
             await self.event_bus.publish("circ-flow-pid", circ_flow_pid_msg)
 
             await asyncio.sleep(self.controller_loop_intervals)  # Adjust the loop frequency as needed
+
+    async def handle_pid_cmd(self, payload):
+        try:
+            t = str(payload.get("type", "")).lower() if isinstance(payload, dict) else ""
+            if t == "flow_pid":
+                # Apply gains and desired oxygen only (do not change mode/state here)
+                self.oxy_pump_cmds.oxySP = float(payload.get("desired_oxygen", self.oxy_pump_cmds.oxySP))
+                self.oxy_pump_cmds.oxyKp = float(payload.get("kp", self.oxy_pump_cmds.oxyKp))
+                self.oxy_pump_cmds.oxyKi = float(payload.get("ki", self.oxy_pump_cmds.oxyKi))
+                self.oxy_pump_cmds.oxyKd = float(payload.get("kd", self.oxy_pump_cmds.oxyKd))
+            elif t == "flow_pid_enable":
+                enabled = bool(payload.get("enabled", False)) if isinstance(payload, dict) else False
+                self.oxy_pump_cmds.circFlowSpeed = -1 if enabled else 0
+                self.state = CircFlowController.STATE_PID if enabled else CircFlowController.STATE_DIRECT_CONTROL
+        except Exception as e:
+            self.logger.error(f"CircFlowController: handle_pid_cmd error: {e}")
+
+    async def _pid_status_loop(self):
+        """Periodically publish current PID configuration/status for flow controller."""
+        while True:
+            try:
+                mode_map = {
+                    CircFlowController.STATE_IDLE: "IDLE",
+                    CircFlowController.STATE_DIRECT_CONTROL: "DIRECT",
+                    CircFlowController.STATE_PID: "PID",
+                }
+                payload = {
+                    "event": "pid_status",
+                    "controller": "flow",
+                    "pid_enabled": bool(self.oxy_pump_cmds.circFlowSpeed == -1),
+                    "desired_oxygen": float(self.oxy_pump_cmds.oxySP),
+                    "kp": float(self.oxy_pump_cmds.oxyKp),
+                    "ki": float(self.oxy_pump_cmds.oxyKi),
+                    "kd": float(self.oxy_pump_cmds.oxyKd),
+                    "mode": mode_map.get(self.state, "IDLE"),
+                }
+                # message_source: pid_flow so ModuleHandler can route to pid-flow-status/<id>
+                try:
+                    self.logger.send_system_message("pid_flow", payload)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            # Heartbeat interval ~1s
+            try:
+                import uasyncio as asyncio
+                await asyncio.sleep(1.0)
+            except Exception:
+                pass
 
