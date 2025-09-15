@@ -135,10 +135,13 @@ class PressureFlowController:
                 self.pressure_pump_cmd.pressureKp = float(payload.get("kp", self.pressure_pump_cmd.pressureKp))
                 self.pressure_pump_cmd.pressureKi = float(payload.get("ki", self.pressure_pump_cmd.pressureKi))
                 self.pressure_pump_cmd.pressureKd = float(payload.get("kd", self.pressure_pump_cmd.pressureKd))
+                # Immediately publish updated status
+                self._publish_pid_status_once()
             elif t == "pressure_pid_enable":
                 enabled = bool(payload.get("enabled", False)) if isinstance(payload, dict) else False
                 self.pressure_pump_cmd.pressureFlowSpeed = -1 if enabled else 0
                 self.state = PressureFlowController.STATE_PID if enabled else PressureFlowController.STATE_DIRECT_CONTROL
+                self._publish_pid_status_once()
         except Exception as e:
             self.logger.error(f"PressureFlowController: handle_pid_cmd error: {e}")
 
@@ -146,26 +149,7 @@ class PressureFlowController:
         """Periodically publish current PID configuration/status for pressure controller."""
         while True:
             try:
-                mode_map = {
-                    PressureFlowController.STATE_IDLE: "IDLE",
-                    PressureFlowController.STATE_DIRECT_CONTROL: "DIRECT",
-                    PressureFlowController.STATE_PID: "PID",
-                }
-                payload = {
-                    "event": "pid_status",
-                    "controller": "pressure",
-                    "pid_enabled": bool(self.pressure_pump_cmd.pressureFlowSpeed == -1),
-                    "desired_pressure": float(self.pressure_pump_cmd.pressureSP),
-                    "kp": float(self.pressure_pump_cmd.pressureKp),
-                    "ki": float(self.pressure_pump_cmd.pressureKi),
-                    "kd": float(self.pressure_pump_cmd.pressureKd),
-                    "mode": mode_map.get(self.state, "IDLE"),
-                }
-                # message_source: pid_pressure so ModuleHandler can route to pid-pressure-status/<id>
-                try:
-                    self.logger.send_system_message("pid_pressure", payload)
-                except Exception:
-                    pass
+                self._publish_pid_status_once()
             except Exception:
                 pass
             # Heartbeat interval ~1s
@@ -174,4 +158,25 @@ class PressureFlowController:
                 await asyncio.sleep(1.0)
             except Exception:
                 pass
+
+    def _publish_pid_status_once(self):
+        try:
+            mode_map = {
+                PressureFlowController.STATE_IDLE: "IDLE",
+                PressureFlowController.STATE_DIRECT_CONTROL: "DIRECT",
+                PressureFlowController.STATE_PID: "PID",
+            }
+            payload = {
+                "event": "pid_status",
+                "controller": "pressure",
+                "pid_enabled": bool(self.pressure_pump_cmd.pressureFlowSpeed == -1),
+                "desired_pressure": float(self.pressure_pump_cmd.pressureSP),
+                "kp": float(self.pressure_pump_cmd.pressureKp),
+                "ki": float(self.pressure_pump_cmd.pressureKi),
+                "kd": float(self.pressure_pump_cmd.pressureKd),
+                "mode": mode_map.get(self.state, "IDLE"),
+            }
+            self.logger.send_system_message("pid_pressure", payload)
+        except Exception:
+            pass
 

@@ -852,6 +852,12 @@ class AlphaCommsManager:
                                 await self.event_bus.publish("pid-circ-flow-controller", payload)
                             elif t == "pressure_pid_enable":
                                 await self.event_bus.publish("pid-pressure-controller", payload)
+                            # Send ack back to host
+                            try:
+                                ack = {"command": "pid_cmd", "status": "acknowledged"}
+                                self.logger.send_system_message("alpha_comms_manager", ack)
+                            except Exception:
+                                pass
                     # Data logger control
                     if command_type == "start_data_log":
                         await self.event_bus.publish("data-log-cmd", True)

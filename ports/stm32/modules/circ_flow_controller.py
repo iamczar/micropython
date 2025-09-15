@@ -145,10 +145,13 @@ class CircFlowController:
                 self.oxy_pump_cmds.oxyKp = float(payload.get("kp", self.oxy_pump_cmds.oxyKp))
                 self.oxy_pump_cmds.oxyKi = float(payload.get("ki", self.oxy_pump_cmds.oxyKi))
                 self.oxy_pump_cmds.oxyKd = float(payload.get("kd", self.oxy_pump_cmds.oxyKd))
+                # Immediately publish updated status so UI reflects change quickly
+                self._publish_pid_status_once()
             elif t == "flow_pid_enable":
                 enabled = bool(payload.get("enabled", False)) if isinstance(payload, dict) else False
                 self.oxy_pump_cmds.circFlowSpeed = -1 if enabled else 0
                 self.state = CircFlowController.STATE_PID if enabled else CircFlowController.STATE_DIRECT_CONTROL
+                self._publish_pid_status_once()
         except Exception as e:
             self.logger.error(f"CircFlowController: handle_pid_cmd error: {e}")
 
@@ -156,26 +159,7 @@ class CircFlowController:
         """Periodically publish current PID configuration/status for flow controller."""
         while True:
             try:
-                mode_map = {
-                    CircFlowController.STATE_IDLE: "IDLE",
-                    CircFlowController.STATE_DIRECT_CONTROL: "DIRECT",
-                    CircFlowController.STATE_PID: "PID",
-                }
-                payload = {
-                    "event": "pid_status",
-                    "controller": "flow",
-                    "pid_enabled": bool(self.oxy_pump_cmds.circFlowSpeed == -1),
-                    "desired_oxygen": float(self.oxy_pump_cmds.oxySP),
-                    "kp": float(self.oxy_pump_cmds.oxyKp),
-                    "ki": float(self.oxy_pump_cmds.oxyKi),
-                    "kd": float(self.oxy_pump_cmds.oxyKd),
-                    "mode": mode_map.get(self.state, "IDLE"),
-                }
-                # message_source: pid_flow so ModuleHandler can route to pid-flow-status/<id>
-                try:
-                    self.logger.send_system_message("pid_flow", payload)
-                except Exception:
-                    pass
+                self._publish_pid_status_once()
             except Exception:
                 pass
             # Heartbeat interval ~1s
@@ -184,4 +168,25 @@ class CircFlowController:
                 await asyncio.sleep(1.0)
             except Exception:
                 pass
+
+    def _publish_pid_status_once(self):
+        try:
+            mode_map = {
+                CircFlowController.STATE_IDLE: "IDLE",
+                CircFlowController.STATE_DIRECT_CONTROL: "DIRECT",
+                CircFlowController.STATE_PID: "PID",
+            }
+            payload = {
+                "event": "pid_status",
+                "controller": "flow",
+                "pid_enabled": bool(self.oxy_pump_cmds.circFlowSpeed == -1),
+                "desired_oxygen": float(self.oxy_pump_cmds.oxySP),
+                "kp": float(self.oxy_pump_cmds.oxyKp),
+                "ki": float(self.oxy_pump_cmds.oxyKi),
+                "kd": float(self.oxy_pump_cmds.oxyKd),
+                "mode": mode_map.get(self.state, "IDLE"),
+            }
+            self.logger.send_system_message("pid_flow", payload)
+        except Exception:
+            pass
 
