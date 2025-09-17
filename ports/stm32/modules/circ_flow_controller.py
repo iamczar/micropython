@@ -58,7 +58,7 @@ class CircFlowController:
         self.subscribe_to_topic("pid-circ-flow-controller", self.handle_pid_cmd)
         self.logger.info("CircFlowController Initilised")
 
-        # Start PID status heartbeat
+        # PID status heartbeat (enabled)
         try:
             import uasyncio as asyncio
             asyncio.create_task(self._pid_status_loop())
@@ -133,11 +133,28 @@ class CircFlowController:
                                 self.oxy_pump_cmds.oxyKd)
             
             await self.event_bus.publish("circ-flow-pid", circ_flow_pid_msg)
+            # Also publish desired flow pump speed (user-commanded circFlowSpeed)
+            try:
+                await self.event_bus.publish("circ-flow-desired-speed", int(self.oxy_pump_cmds.circFlowSpeed))
+            except Exception:
+                pass
 
             await asyncio.sleep(self.controller_loop_intervals)  # Adjust the loop frequency as needed
 
     async def handle_pid_cmd(self, payload):
         try:
+            # Normalize payload to dict
+            import json as _json
+            if isinstance(payload, (bytes, bytearray)):
+                try:
+                    payload = _json.loads(payload.decode())
+                except Exception:
+                    payload = {}
+            elif isinstance(payload, str):
+                try:
+                    payload = _json.loads(payload)
+                except Exception:
+                    payload = {}
             t = str(payload.get("type", "")).lower() if isinstance(payload, dict) else ""
             if t == "flow_pid":
                 # Apply gains and desired oxygen only (do not change mode/state here)
@@ -152,6 +169,7 @@ class CircFlowController:
                 self.oxy_pump_cmds.circFlowSpeed = -1 if enabled else 0
                 self.state = CircFlowController.STATE_PID if enabled else CircFlowController.STATE_DIRECT_CONTROL
                 self._publish_pid_status_once()
+            # Getter removed; periodic/status-on-change covers UI
         except Exception as e:
             self.logger.error(f"CircFlowController: handle_pid_cmd error: {e}")
 

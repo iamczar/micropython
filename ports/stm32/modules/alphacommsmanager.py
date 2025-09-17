@@ -842,22 +842,53 @@ class AlphaCommsManager:
                         except Exception:
                             msg = {}
                         payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else msg
+                        # Unwrap UI envelope: {message_source, timestamp, message:{...}}
+                        if isinstance(payload, dict) and isinstance(payload.get("message"), dict):
+                            payload = payload.get("message")
                         if isinstance(payload, dict):
                             t = str(payload.get("type", "")).lower()
                             if t == "flow_pid":
-                                await self.event_bus.publish("pid-circ-flow-controller", payload)
+                                # Forward a normalized dict payload only
+                                await self.event_bus.publish("pid-circ-flow-controller", dict(payload))
+                                try:
+                                    self.logger.send_system_message("alpha_comms_manager", {
+                                        "event": "pid_routed",
+                                        "topic": "pid-circ-flow-controller",
+                                        "type": t,
+                                    })
+                                except Exception:
+                                    pass
                             elif t == "pressure_pid":
-                                await self.event_bus.publish("pid-pressure-controller", payload)
+                                await self.event_bus.publish("pid-pressure-controller", dict(payload))
+                                try:
+                                    self.logger.send_system_message("alpha_comms_manager", {
+                                        "event": "pid_routed",
+                                        "topic": "pid-pressure-controller",
+                                        "type": t,
+                                    })
+                                except Exception:
+                                    pass
                             elif t == "flow_pid_enable":
-                                await self.event_bus.publish("pid-circ-flow-controller", payload)
+                                await self.event_bus.publish("pid-circ-flow-controller", dict(payload))
+                                try:
+                                    self.logger.send_system_message("alpha_comms_manager", {
+                                        "event": "pid_routed",
+                                        "topic": "pid-circ-flow-controller",
+                                        "type": t,
+                                    })
+                                except Exception:
+                                    pass
                             elif t == "pressure_pid_enable":
-                                await self.event_bus.publish("pid-pressure-controller", payload)
-                            # Send ack back to host
-                            try:
-                                ack = {"command": "pid_cmd", "status": "acknowledged"}
-                                self.logger.send_system_message("alpha_comms_manager", ack)
-                            except Exception:
-                                pass
+                                await self.event_bus.publish("pid-pressure-controller", dict(payload))
+                            # Getter commands removed; controllers now publish periodically
+                                try:
+                                    self.logger.send_system_message("alpha_comms_manager", {
+                                        "event": "pid_routed",
+                                        "topic": "pid-pressure-controller",
+                                        "type": t,
+                                    })
+                                except Exception:
+                                    pass
                     # Data logger control
                     if command_type == "start_data_log":
                         await self.event_bus.publish("data-log-cmd", True)

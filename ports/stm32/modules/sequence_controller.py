@@ -199,6 +199,11 @@ class PausedState(State):
         })
 
     async def on_resume(self):
+        # Reassert the last commanded motor speeds before resuming execution
+        try:
+            self.context._publish_resume_commands()
+        except Exception:
+            pass
         await self.context._transition("executing")
 
     async def on_stop(self):
@@ -340,6 +345,17 @@ class SequenceController:
             self._hold_remaining_ms = 0
             self._hold_until_ms = 0
             self._line_dispatched = False
+            # Reset sequence counters and clear persisted state so UI shows 0/0
+            try:
+                self.current_sequence_number = 0
+                self.total_sequences = 0
+                self.sequence_data = []
+                try:
+                    uos.remove(self.state_file_path)
+                except Exception:
+                    pass
+            except Exception:
+                pass
             # Stop data logging on stop
             try:
                 if self.event_bus:
@@ -542,6 +558,26 @@ class SequenceController:
             if self.event_bus:
                 asyncio.create_task(self.event_bus.publish("oxy-pump-cmds", oxy.pack()))
                 asyncio.create_task(self.event_bus.publish("pressure-pump-cmd", pres.pack()))
+        except Exception:
+            pass
+
+    def _publish_resume_commands(self):
+        """Re-publish last non-zero motor commands so motors resume after a pause.
+
+        This is especially important when paused on the final sequence line, where
+        no new line dispatch will occur to naturally reassert speeds.
+        """
+        try:
+            if self.event_bus:
+                if self._last_oxy_cmd is not None:
+                    asyncio.create_task(self.event_bus.publish("oxy-pump-cmds", self._last_oxy_cmd.pack()))
+                if self._last_pressure_cmd is not None:
+                    asyncio.create_task(self.event_bus.publish("pressure-pump-cmd", self._last_pressure_cmd.pack()))
+                # Restore wrist command as well
+                try:
+                    asyncio.create_task(self.event_bus.publish("wrist-cmds", int(self._last_wrist_cmd or 0)))
+                except Exception:
+                    pass
         except Exception:
             pass
     

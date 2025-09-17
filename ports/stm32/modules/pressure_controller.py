@@ -47,7 +47,7 @@ class PressureFlowController:
         self.subscribe_to_topic("pid-pressure-controller", self.handle_pid_cmd)
         self.logger.info("pressflowctrl init")
 
-        # Start PID status heartbeat
+        # PID status heartbeat (enabled)
         try:
             import uasyncio as asyncio
             asyncio.create_task(self._pid_status_loop())
@@ -123,11 +123,28 @@ class PressureFlowController:
                                 self.pressure_pump_cmd.pressureKd)
             
             await self.event_bus.publish("pressure-pid", pressure_pid_msg)
+            # Also publish desired pressure pump speed (user-commanded pressureFlowSpeed)
+            try:
+                await self.event_bus.publish("pressure-flow-desired-speed", int(self.pressure_pump_cmd.pressureFlowSpeed))
+            except Exception:
+                pass
 
             await asyncio.sleep(self.controller_loop_intervals)  # Adjust the loop frequency as needed
 
     async def handle_pid_cmd(self, payload):
         try:
+            # Normalize payload to dict
+            import json as _json
+            if isinstance(payload, (bytes, bytearray)):
+                try:
+                    payload = _json.loads(payload.decode())
+                except Exception:
+                    payload = {}
+            elif isinstance(payload, str):
+                try:
+                    payload = _json.loads(payload)
+                except Exception:
+                    payload = {}
             t = str(payload.get("type", "")).lower() if isinstance(payload, dict) else ""
             if t == "pressure_pid":
                 # Apply gains and desired pressure only (do not change mode/state here)
@@ -142,6 +159,7 @@ class PressureFlowController:
                 self.pressure_pump_cmd.pressureFlowSpeed = -1 if enabled else 0
                 self.state = PressureFlowController.STATE_PID if enabled else PressureFlowController.STATE_DIRECT_CONTROL
                 self._publish_pid_status_once()
+            # Getter removed; periodic/status-on-change covers UI
         except Exception as e:
             self.logger.error(f"PressureFlowController: handle_pid_cmd error: {e}")
 
