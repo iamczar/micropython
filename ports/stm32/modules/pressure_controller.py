@@ -123,9 +123,20 @@ class PressureFlowController:
                                 self.pressure_pump_cmd.pressureKd)
             
             await self.event_bus.publish("pressure-pid", pressure_pid_msg)
-            # Also publish desired pressure pump speed (user-commanded pressureFlowSpeed)
+            # Also publish desired pressure pump speed in a consistent unit across modes.
+            # - In DIRECT_CONTROL, publish the commanded pressureFlowSpeed.
+            # - In PID mode, derive the equivalent pressureFlowSpeed from motor_speed_hz using the inverse mapping.
             try:
-                await self.event_bus.publish("pressure-flow-desired-speed", int(self.pressure_pump_cmd.pressureFlowSpeed))
+                desired_speed = 0.0
+                if self.state == self.STATE_DIRECT_CONTROL:
+                    desired_speed = float(self.pressure_pump_cmd.pressureFlowSpeed)
+                elif self.state == self.STATE_PID:
+                    # pressureFlowSpeed = motor_speed_hz * (tube_rate * 60) / (8 * 200)
+                    if self.tube_rate:
+                        desired_speed = (float(self.motor_speed_hz) * (self.tube_rate * 60.0)) / (8.0 * 200.0)
+                    else:
+                        desired_speed = 0.0
+                await self.event_bus.publish("pressure-flow-desired-speed", desired_speed)
             except Exception:
                 pass
 
