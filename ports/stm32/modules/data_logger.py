@@ -29,8 +29,7 @@ class SensorDataIndex:
     OXYGENMEASURED2 = 18
     OXYGENMEASURED3 = 19
     OXYGENMEASURED4 = 20
-    CIRC_FLOW_SPEED_DESIRED = 21
-    PRESSURE_FLOW_SPEED_DESIRED = 22
+    # Desired speed indices removed
 
 
 class DataLogger:
@@ -43,7 +42,8 @@ class DataLogger:
         self.logger = logger
         self.log_active = False
         self.filename = None
-        self.sensor_data_array = array.array('f', [0.0] * 23)  # 'f' for float
+        # Size matches highest index used (OXYGENMEASURED4 == 20) -> 21 entries
+        self.sensor_data_array = array.array('f', [0.0] * 21)  # 'f' for float
 
         self.sensor_read_interval = 1 / log_loop_frequency_hz
 
@@ -57,9 +57,7 @@ class DataLogger:
         self.subscribe_to_topic("press-pump-02-status",self.handle_press_pump_status)
         self.subscribe_to_topic("circ-flow-pid",self.handle_circ_flow_pid)
         self.subscribe_to_topic("pressure-pid",self.handle_press_pid)
-        # Desired speed channels from controllers
-        self.subscribe_to_topic("circ-flow-desired-speed", self.handle_circ_flow_desired)
-        self.subscribe_to_topic("pressure-flow-desired-speed", self.handle_press_flow_desired)
+        # Removed desired speed channels
                
         # Subscribe to the data-logger-actuator to start/stop logging
         self.subscribe_to_topic("data-log-cmd", self.handle_event_datalogger)
@@ -320,19 +318,7 @@ class DataLogger:
         self.sensor_data_array[SensorDataIndex.OXYGENKD] = kd
         await asyncio.sleep(0)
 
-    async def handle_circ_flow_desired(self, value):
-        try:
-            self.sensor_data_array[SensorDataIndex.CIRC_FLOW_SPEED_DESIRED] = float(value)
-        except Exception:
-            pass
-        await asyncio.sleep(0)
-
-    async def handle_press_flow_desired(self, value):
-        try:
-            self.sensor_data_array[SensorDataIndex.PRESSURE_FLOW_SPEED_DESIRED] = float(value)
-        except Exception:
-            pass
-        await asyncio.sleep(0)
+    # Removed handlers for desired speed
         
     def _write_to_file(self):
         """Write the sensor data directly to the CSV file and refresh the SD card."""
@@ -416,8 +402,7 @@ class DataLogger:
                     "oxygen_measured_2": self.sensor_data_array[SensorDataIndex.OXYGENMEASURED2],
                     "oxygen_measured_3": self.sensor_data_array[SensorDataIndex.OXYGENMEASURED3],
                     "oxygen_measured_4": self.sensor_data_array[SensorDataIndex.OXYGENMEASURED4],
-                    "circ_flow_speed_desired": self.sensor_data_array[SensorDataIndex.CIRC_FLOW_SPEED_DESIRED],
-                    "pressure_flow_speed_desired": self.sensor_data_array[SensorDataIndex.PRESSURE_FLOW_SPEED_DESIRED]
+                    # desired speeds removed
                 }
             }
             

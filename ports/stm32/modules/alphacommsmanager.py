@@ -379,6 +379,17 @@ class AlphaCommsManager:
 
         # PID override state (debug mode)
         self._pid_override_enabled = False
+        # Initialize from config.json if present so we honor boot-time setting
+        try:
+            from config import Config  # defer import to avoid hard dependency at module import time
+            try:
+                _pid_flag = int(Config('config.json').get_config("pid_override") or 0)
+                self._pid_override_enabled = (_pid_flag == 1)
+            except Exception:
+                self._pid_override_enabled = False
+        except Exception:
+            # Config not available; default false
+            pass
         self._override_oxygen_value = 0.0  # decimal fraction (e.g., 0.21)
         self._override_pressure_value = 0.0  # PSI
         asyncio.create_task(self._pid_override_loop())
