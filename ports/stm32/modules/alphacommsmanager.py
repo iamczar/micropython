@@ -376,6 +376,12 @@ class AlphaCommsManager:
         
         # Initialize state object
         asyncio.create_task(self.current_state_object.enter())
+
+        # PID override state (debug mode)
+        self._pid_override_enabled = False
+        self._override_oxygen_value = 0.0  # decimal fraction (e.g., 0.21)
+        self._override_pressure_value = 0.0  # PSI
+        asyncio.create_task(self._pid_override_loop())
     
     def _init_file_system(self):
         """Initialize file system and create necessary directories"""
@@ -889,6 +895,42 @@ class AlphaCommsManager:
                                     })
                                 except Exception:
                                     pass
+                            elif t == "debug_mode":
+                                # Enable/disable and inject dummy oxygen/pressure values
+                                try:
+                                    if "enabled" in payload:
+                                        self._set_pid_override_enabled(bool(payload.get("enabled")))
+                                    if "oxygen" in payload:
+                                        try:
+                                            self._override_oxygen_value = float(payload.get("oxygen"))
+                                        except Exception:
+                                            pass
+                                        # Immediate publish (decimal fraction) to match oxygen_sensor.py
+                                        if self.event_bus and self._pid_override_enabled:
+                                            await self.event_bus.publish("oxy-sen-1", float(self._override_oxygen_value))
+                                    if "pressure" in payload:
+                                        try:
+                                            self._override_pressure_value = float(payload.get("pressure"))
+                                        except Exception:
+                                            pass
+                                        # Immediate publish (PSI) to match pressure_sensor.py
+                                        if self.event_bus and self._pid_override_enabled:
+                                            await self.event_bus.publish("pressure-sen", float(self._override_pressure_value))
+                                    # Ack/debug
+                                    try:
+                                        self.logger.send_system_message("alpha_comms_manager", {
+                                            "event": "pid_override_update",
+                                            "enabled": bool(self._pid_override_enabled),
+                                            "oxygen": float(self._override_oxygen_value),
+                                            "pressure": float(self._override_pressure_value),
+                                        })
+                                    except Exception:
+                                        pass
+                                except Exception as _e:
+                                    try:
+                                        self.logger.error(f"AlphaCommsManager: debug_mode error: {_e}")
+                                    except Exception:
+                                        pass
                     # Data logger control
                     if command_type == "start_data_log":
                         await self.event_bus.publish("data-log-cmd", True)
@@ -902,6 +944,88 @@ class AlphaCommsManager:
             
         except Exception as e:
             self.logger.error(f"AlphaCommsManager: Error handling {command_type} command: {e}")
+
+    async def _pid_override_loop(self):
+        """If override is enabled, periodically publish dummy sensor values to real sensor topics."""
+        while True:
+            try:
+                if self._pid_override_enabled and self.event_bus:
+                    try:
+                        await self.event_bus.publish("oxy-sen-1", float(self._override_oxygen_value))
+                    except Exception:
+                        pass
+                    try:
+                        await self.event_bus.publish("pressure-sen", float(self._override_pressure_value))
+                    except Exception:
+                        pass
+                # Periodic status heartbeat so host can reflect current override state
+                try:
+                    self.logger.send_system_message("alpha_comms_manager", {
+                        "event": "pid_override_status",
+                        "enabled": bool(self._pid_override_enabled),
+                    })
+                except Exception:
+                    pass
+                import uasyncio as _asyncio
+                await _asyncio.sleep(1.0)
+            except Exception:
+                try:
+                    import uasyncio as _asyncio
+                    await _asyncio.sleep(1.0)
+                except Exception:
+                    pass
+
+    def _set_pid_override_enabled(self, enabled: bool):
+        try:
+            self._pid_override_enabled = bool(enabled)
+            # Persist to config.json so sensors are gated on next boot
+            try:
+                self._update_config_pid_override(1 if self._pid_override_enabled else 0)
+            except Exception as _e:
+                try:
+                    self.logger.error(f"AlphaCommsManager: Failed to update config pid_override: {_e}")
+                except Exception:
+                    pass
+            # Notify host
+            self._publish_pid_override_status()
+        except Exception:
+            pass
+
+    def _publish_pid_override_status(self):
+        try:
+            payload = {
+                "event": "pid_override_status",
+                "enabled": bool(self._pid_override_enabled),
+            }
+            self.logger.send_system_message("alpha_comms_manager", payload)
+        except Exception:
+            pass
+
+    def _update_config_pid_override(self, value: int):
+        """Update pid_override in config.json (1 or 0)."""
+        try:
+            import json as _json
+            path = "config.json"
+            cfg = {}
+            try:
+                with open(path, "r") as f:
+                    cfg = _json.loads(f.read() or "{}")
+            except Exception:
+                cfg = {}
+            try:
+                cfg["pid_override"] = int(value)
+            except Exception:
+                cfg["pid_override"] = 1 if value else 0
+            try:
+                with open(path, "w") as f:
+                    f.write(_json.dumps(cfg))
+            except Exception as _e:
+                try:
+                    self.logger.error(f"AlphaCommsManager: Failed writing config.json: {_e}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
     
     def _check_sequence_retry_timeout(self):
         """

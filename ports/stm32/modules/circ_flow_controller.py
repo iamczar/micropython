@@ -26,9 +26,11 @@ class CircFlowController:
         self.target_oxygen_level:float = 1.0
         self.motor_direction = False
         self.desired_flow_ml_m:int = -1 # use PID as default > -1 means bypass PID
+        self.base_motor_speed_hz:int = 1000  # Base speed for PID mode (reasonable starting point)
         self.motor_speed_hz:int = 1 # this is the variable that will store the output from the PID or the direct control
         self.oxy_1_percent_o2:int = 0
-        self.pid = PID(Kp=kp,Ki=ki,Kd=kd, setpoint=1, output_limits=(-1000, 1000))
+        # Adjusted PID parameters for slow biological system with 1Hz control loop
+        self.pid = PID(Kp=kp,Ki=ki,Kd=kd, setpoint=1, output_limits=(-500, 500))
         self.logger = logger
         self.name = "CircFlowController"
         self.state = CircFlowController.STATE_IDLE
@@ -115,11 +117,13 @@ class CircFlowController:
                 self.logger.info(f"{self.name}:controller_loop:motor_speed_hz:{self.motor_speed_hz}:circFlowSpeed:{self.oxy_pump_cmds.circFlowSpeed}")
                 
             elif self.state == self.STATE_PID:
-                # Use PID control
+                # Use PID control with base speed + offset approach
                 self.pid.set_setpoint(self.oxy_pump_cmds.oxySP)
                 throttle = self.pid.compute(self.oxy_1_percent_o2)
-                self.motor_speed_hz = self.motor_speed_hz + throttle
-                #self.logger.debug(f"controller_loop:pid enabled:target_oxy_lvl:{self.oxy_pump_cmds.oxySP}:curent_oxy_percent_o2:{self.oxy_1_percent_o2}")
+                self.motor_speed_hz = self.base_motor_speed_hz + int(throttle)
+                # Ensure motor speed stays within valid range
+                self.motor_speed_hz = max(0, min(60000, self.motor_speed_hz))
+                #self.logger.debug(f"controller_loop:pid enabled:target_oxy_lvl:{self.oxy_pump_cmds.oxySP}:current_oxy_percent_o2:{self.oxy_1_percent_o2}:throttle:{throttle}:motor_speed:{self.motor_speed_hz}")
 
             pump_1_actuator_msg = (self.oxy_pump_cmds.pump1dir,
                                       self.motor_speed_hz,
@@ -177,6 +181,13 @@ class CircFlowController:
                 self._publish_pid_status_once()
             elif t == "flow_pid_enable":
                 enabled = bool(payload.get("enabled", False)) if isinstance(payload, dict) else False
+                # Reset PID when switching to PID mode to avoid accumulated errors
+                if enabled and self.state != CircFlowController.STATE_PID:
+                    self.pid.reset()
+                    self.logger.info(f"{self.name}: PID enabled, reset PID state")
+                elif not enabled:
+                    self.logger.info(f"{self.name}: PID disabled, switching to direct control")
+                    
                 self.oxy_pump_cmds.circFlowSpeed = -1 if enabled else 0
                 self.state = CircFlowController.STATE_PID if enabled else CircFlowController.STATE_DIRECT_CONTROL
                 self._publish_pid_status_once()

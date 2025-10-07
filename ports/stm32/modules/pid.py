@@ -24,18 +24,29 @@ class PID:
         time_delta = current_time - self._last_time  # Calculate time since last update
 
         if time_delta > 0:  # Proceed only if time has passed
+            # Convert milliseconds to seconds for proper scaling
+            time_delta_sec = time_delta / 1000.0
+            
             # Calculate error
             error = self.setpoint - measured_value
 
             # Proportional term
             proportional = self.Kp * error
 
-            # Integral term
-            self._integral += self.Ki * error * time_delta
-            self._integral = self._clamp(self._integral)  # Prevent integral windup
-
-            # Derivative term
-            derivative = (error - self._previous_error) / time_delta if time_delta > 0 else 0
+            # Integral term with proper time scaling
+            self._integral += self.Ki * error * time_delta_sec
+            
+            # Anti-windup: only integrate when output isn't saturated
+            temp_output = proportional + self._integral
+            if self.min_output is not None and temp_output < self.min_output:
+                # Output would be saturated low, don't integrate
+                self._integral -= self.Ki * error * time_delta_sec
+            elif self.max_output is not None and temp_output > self.max_output:
+                # Output would be saturated high, don't integrate  
+                self._integral -= self.Ki * error * time_delta_sec
+            
+            # Derivative term with proper time scaling
+            derivative = (error - self._previous_error) / time_delta_sec if time_delta_sec > 0 else 0
             derivative_term = self.Kd * derivative
 
             # Compute PID output

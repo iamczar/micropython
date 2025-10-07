@@ -25,9 +25,11 @@ class PressureFlowController:
         self.target_pressure_level:float = 1.0
         self.motor_direction = False
         self.desired_pressure_flow_ml_m:int = -1 # use PID as default > -1 means bypass PID
+        self.base_motor_speed_hz:int = 1000  # Base speed for PID mode (reasonable starting point)
         self.motor_speed_hz:int = 1 # this is the variable that will store the output from the PID or the direct control
         self.pressure_mbar:int = 0
-        self.pid = PID(Kp=kp,Ki=ki,Kd=kd, setpoint=1, output_limits=(-5000, 5000)) # motor frequency in hz
+        # Adjusted PID parameters for slow biological system with 1Hz control loop
+        self.pid = PID(Kp=kp,Ki=ki,Kd=kd, setpoint=1, output_limits=(-500, 500)) # motor frequency in hz
         self.logger = logger
         self.name = "PressFlowCtrl"
         self.state = PressureFlowController.STATE_IDLE
@@ -105,11 +107,14 @@ class PressureFlowController:
                 self.logger.info(f"{self.name}:controller_loop:motor_speed_hz:{self.motor_speed_hz}:pressureFlowSpeed:{self.pressure_pump_cmd.pressureFlowSpeed}")
                 
             elif self.state == self.STATE_PID:
-                # Use PID control
+                # Use PID control with base speed + offset approach
+                # For pressure: lower motor speed increases pressure, higher motor speed decreases pressure
                 self.pid.set_setpoint(self.pressure_pump_cmd.pressureSP)
                 throttle = self.pid.compute(self.pressure_mbar)
-                self.motor_speed_hz = self.motor_speed_hz - throttle
-                #self.logger.debug(f"controller_loop:pid enabled:target_oxy_lvl:{self.pressure_pump_cmd.pressureSP}:curent_oxy_percent_o2:{self.pressure_mbar}")
+                self.motor_speed_hz = self.base_motor_speed_hz - int(throttle)  # MINUS: low pressure → positive throttle → decrease motor speed
+                # Ensure motor speed stays within valid range
+                self.motor_speed_hz = max(0, min(60000, self.motor_speed_hz))
+                #self.logger.debug(f"controller_loop:pid enabled:target_pressure_lvl:{self.pressure_pump_cmd.pressureSP}:current_pressure_mbar:{self.pressure_mbar}:throttle:{throttle}:motor_speed:{self.motor_speed_hz}")
 
             pump_act_msg = (self.pressure_pump_cmd.pump2dir,
                             self.motor_speed_hz,
@@ -167,6 +172,13 @@ class PressureFlowController:
                 self._publish_pid_status_once()
             elif t == "pressure_pid_enable":
                 enabled = bool(payload.get("enabled", False)) if isinstance(payload, dict) else False
+                # Reset PID when switching to PID mode to avoid accumulated errors
+                if enabled and self.state != PressureFlowController.STATE_PID:
+                    self.pid.reset()
+                    self.logger.info(f"{self.name}: PID enabled, reset PID state")
+                elif not enabled:
+                    self.logger.info(f"{self.name}: PID disabled, switching to direct control")
+                    
                 self.pressure_pump_cmd.pressureFlowSpeed = -1 if enabled else 0
                 self.state = PressureFlowController.STATE_PID if enabled else PressureFlowController.STATE_DIRECT_CONTROL
                 self._publish_pid_status_once()
