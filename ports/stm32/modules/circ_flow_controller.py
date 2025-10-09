@@ -19,10 +19,10 @@ class CircFlowController:
                  kd:float=1.0,
                  oxy_pid_sensor = 1,
                  tube_bore = 1,
-                 controller_loop_hz:int=10):
+                 controller_loop_hz:float=10.0):
         self.event_bus = event_bus
         self.logger = logger
-        self.controller_loop_intervals:float = 1/controller_loop_hz
+        self.controller_loop_intervals:float = 1.0/float(controller_loop_hz)
         self.target_oxygen_level:float = 1.0
         self.motor_direction = False
         self.desired_flow_ml_m:int = -1 # use PID as default > -1 means bypass PID

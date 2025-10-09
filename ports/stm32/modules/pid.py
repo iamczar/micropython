@@ -33,17 +33,8 @@ class PID:
             # Proportional term
             proportional = self.Kp * error
 
-            # Integral term with proper time scaling
+            # Integral term with proper time scaling (no anti-windup guard)
             self._integral += self.Ki * error * time_delta_sec
-            
-            # Anti-windup: only integrate when output isn't saturated
-            temp_output = proportional + self._integral
-            if self.min_output is not None and temp_output < self.min_output:
-                # Output would be saturated low, don't integrate
-                self._integral -= self.Ki * error * time_delta_sec
-            elif self.max_output is not None and temp_output > self.max_output:
-                # Output would be saturated high, don't integrate  
-                self._integral -= self.Ki * error * time_delta_sec
             
             # Derivative term with proper time scaling
             derivative = (error - self._previous_error) / time_delta_sec if time_delta_sec > 0 else 0

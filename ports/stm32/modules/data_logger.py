@@ -45,7 +45,10 @@ class DataLogger:
         # Size matches highest index used (OXYGENMEASURED4 == 20) -> 21 entries
         self.sensor_data_array = array.array('f', [0.0] * 21)  # 'f' for float
 
-        self.sensor_read_interval = 1 / log_loop_frequency_hz
+        try:
+            self.sensor_read_interval = 1.0 / float(log_loop_frequency_hz)
+        except Exception:
+            self.sensor_read_interval = 1.0
 
         # Subscribe to sensor topics
         self.subscribe_to_topic("oxy-sen-1", self.handle_event_oxy1)

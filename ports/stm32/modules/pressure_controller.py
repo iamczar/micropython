@@ -18,10 +18,10 @@ class PressureFlowController:
                  ki:float=1.0,
                  kd:float=1.0,
                  tube_bore = 1,
-                 controller_loop_hz:int=10):
+                 controller_loop_hz:float=10.0):
         self.event_bus = event_bus
         self.logger = logger
-        self.controller_loop_intervals:int = 1/controller_loop_hz
+        self.controller_loop_intervals:float = 1.0/float(controller_loop_hz)
         self.target_pressure_level:float = 1.0
         self.motor_direction = False
         self.desired_pressure_flow_ml_m:int = -1 # use PID as default > -1 means bypass PID
