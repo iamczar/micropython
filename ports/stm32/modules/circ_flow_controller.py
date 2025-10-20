@@ -19,21 +19,25 @@ class CircFlowController:
                  kd:float=1.0,
                  oxy_pid_sensor = 1,
                  tube_bore = 1,
-                 controller_loop_hz:float=10.0):
+                 controller_loop_hz:float=10.0,
+                 pid_output_min: float = -500.0,
+                 pid_output_max: float = 500.0,
+                 base_motor_speed_hz: float = 1000.0):
         self.event_bus = event_bus
         self.logger = logger
         self.controller_loop_intervals:float = 1.0/float(controller_loop_hz)
         self.target_oxygen_level:float = 1.0
         self.motor_direction = False
         self.desired_flow_ml_m:int = -1 # use PID as default > -1 means bypass PID
-        self.base_motor_speed_hz:int = 1000  # Base speed for PID mode (reasonable starting point)
+        self.base_motor_speed_hz:float = float(base_motor_speed_hz)
         self.motor_speed_hz:int = 1 # this is the variable that will store the output from the PID or the direct control
         self.oxy_1_percent_o2:int = 0
         # Adjusted PID parameters for slow biological system with 1Hz control loop
-        self.pid = PID(Kp=kp,Ki=ki,Kd=kd, setpoint=1, output_limits=(-500, 500))
+        self.pid = PID(Kp=kp,Ki=ki,Kd=kd, setpoint=1, output_limits=(pid_output_min, pid_output_max))
         self.logger = logger
         self.name = "CircFlowController"
         self.state = CircFlowController.STATE_IDLE
+        self._pid_mode_active = False
         self.oxy_pump_cmds = OxyPumpCmds()
         
         # Define the lookup table for oxy sensors
@@ -105,7 +109,18 @@ class CircFlowController:
     async def controller_loop(self):
         """Main loop for receiving sensor data."""
         while True:
-    
+            # One-time PID reset on entering PID mode; clear on exit
+            if self.state == self.STATE_PID:
+                if not self._pid_mode_active:
+                    try:
+                        self.pid.reset()
+                    except Exception:
+                        pass
+                    self._pid_mode_active = True
+            else:
+                if self._pid_mode_active:
+                    self._pid_mode_active = False
+
             if self.state == self.STATE_IDLE:
                 # self.logger.debug(f"{self.name}: Controller is idle.")
                 await asyncio.sleep(self.controller_loop_intervals)
@@ -120,7 +135,8 @@ class CircFlowController:
                 # Use PID control with base speed + offset approach
                 self.pid.set_setpoint(self.oxy_pump_cmds.oxySP)
                 throttle = self.pid.compute(self.oxy_1_percent_o2)
-                self.motor_speed_hz = self.base_motor_speed_hz + int(throttle)
+                # Offset from configured base speed (no accumulation)
+                self.motor_speed_hz = self.base_motor_speed_hz + throttle
                 # Ensure motor speed stays within valid range
                 self.motor_speed_hz = max(0, min(60000, self.motor_speed_hz))
                 #self.logger.debug(f"controller_loop:pid enabled:target_oxy_lvl:{self.oxy_pump_cmds.oxySP}:current_oxy_percent_o2:{self.oxy_1_percent_o2}:throttle:{throttle}:motor_speed:{self.motor_speed_hz}")
