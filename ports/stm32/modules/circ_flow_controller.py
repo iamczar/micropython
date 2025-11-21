@@ -177,6 +177,13 @@ class CircFlowController:
                 self.oxy_pump_cmds.oxyKp = float(payload.get("kp", self.oxy_pump_cmds.oxyKp))
                 self.oxy_pump_cmds.oxyKi = float(payload.get("ki", self.oxy_pump_cmds.oxyKi))
                 self.oxy_pump_cmds.oxyKd = float(payload.get("kd", self.oxy_pump_cmds.oxyKd))
+                # Also push new gains into the live PID so they actually affect control behaviour
+                try:
+                    self.pid.set_kp(self.oxy_pump_cmds.oxyKp)
+                    self.pid.set_ki(self.oxy_pump_cmds.oxyKi)
+                    self.pid.set_kd(self.oxy_pump_cmds.oxyKd)
+                except Exception:
+                    pass
                 # Immediately publish updated status so UI reflects change quickly
                 self._publish_pid_status_once()
             elif t == "flow_pid_enable":

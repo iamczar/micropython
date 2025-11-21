@@ -167,6 +167,13 @@ class PressureFlowController:
                 self.pressure_pump_cmd.pressureKp = float(payload.get("kp", self.pressure_pump_cmd.pressureKp))
                 self.pressure_pump_cmd.pressureKi = float(payload.get("ki", self.pressure_pump_cmd.pressureKi))
                 self.pressure_pump_cmd.pressureKd = float(payload.get("kd", self.pressure_pump_cmd.pressureKd))
+                # Also push new gains into the live PID so they actually affect control behaviour
+                try:
+                    self.pid.set_kp(self.pressure_pump_cmd.pressureKp)
+                    self.pid.set_ki(self.pressure_pump_cmd.pressureKi)
+                    self.pid.set_kd(self.pressure_pump_cmd.pressureKd)
+                except Exception:
+                    pass
                 # Immediately publish updated status
                 self._publish_pid_status_once()
             elif t == "pressure_pid_enable":
