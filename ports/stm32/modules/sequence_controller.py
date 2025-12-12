@@ -421,6 +421,12 @@ class SequenceController:
             if payload:
                 out.update(payload)
             self._send_system(out)
+            # Also publish on internal event bus for components such as ILEMController
+            try:
+                if self.event_bus:
+                    await self.event_bus.publish("sequence-status", dict(out))
+            except Exception:
+                pass
         except Exception:
             pass
 

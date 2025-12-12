@@ -619,8 +619,17 @@ class AlphaCommsManager:
         if details:
             notification.update(details)
             
+        # Send to host via system message
         self.logger.send_system_message("alpha_comms_manager", notification)
         self.logger.info(f"AlphaCommsManager: State changed to {state}")
+
+        # Also publish on internal event bus so other components (e.g. ILEMController)
+        # can observe transfer state without parsing system messages.
+        try:
+            if self.event_bus:
+                await self.event_bus.publish("file-transfer-status", dict(notification))
+        except Exception:
+            pass
     
     async def _transition_to_state(self, new_state: str, details: dict = None):
         """
@@ -675,15 +684,40 @@ class AlphaCommsManager:
                 if self.check_connection():
                     message = self.receive_message()
                     if message:
-                        # Pre-route auto sampler commands
                         try:
                             msg_data = json.loads(message)
                             inner = msg_data.get("message", {}) if isinstance(msg_data, dict) else {}
-                            # Support explicit command type
-                            if isinstance(inner, dict) and inner.get("command") == "auto_sampler_cmd":
+                            cmd = inner.get("command") if isinstance(inner, dict) else None
+
+                            # Route auto sampler commands explicitly
+                            if cmd == "auto_sampler_cmd":
                                 await self._route_auto_sampler_command(inner)
+                            # Route ILEM commands directly to event bus topic 'lem-cmd'
+                            elif cmd == "lem_cmd":
+                                try:
+                                    # Fan-out to internal ILEM path
+                                    if self.event_bus:
+                                        await self.event_bus.publish("lem-cmd", inner)
+                                    # Lightweight ack so host can see that AlphaCommsManager received the command
+                                    try:
+                                        self.logger.send_system_message(
+                                            "alpha_comms_manager",
+                                            {
+                                                "event": "ilem_cmd_ack",
+                                                "stage": "alpha_comms_manager",
+                                                "status": "received",
+                                                "original_cmd": inner,
+                                            },
+                                        )
+                                    except Exception:
+                                        pass
+                                except Exception as e:
+                                    try:
+                                        self.logger.error(f"AlphaCommsManager: Error routing lem_cmd: {e}")
+                                    except Exception:
+                                        pass
                             else:
-                                # Let state machine handle the rest (sequence, stop/pause/resume, etc.)
+                                # Let state machine handle sequence and generic commands
                                 await self.current_state_object.handle_message(message)
                         except Exception as route_e:
                             self.logger.error(f"AlphaCommsManager: Routing error: {route_e}")

@@ -7,15 +7,15 @@ import struct
 class ValveAndAirPumpCmds:
     
     valve1=1
-    valve2=2 
-    valve3=3  
+    valve2=2
+    valve3=3
     valve4=4
     valve5=5
-    valve6=6  
-    valve7=7  
-    valve8=8 
+    valve6=6
+    valve7=7
+    valve8=8
     valve9=9
-    valve10=10  
+    valve10=10
     airpump1=11
     airpump2=12
     
@@ -41,6 +41,60 @@ class ValveAndAirPumpCmds:
 
     def get_valve_airpump_state(self, valve_index):
         return bool(self.states & (1 << (valve_index - 1)))
+
+
+class ILEMValveCmds:
+    """
+    8‑bit command structure for integrated LEM valves (11–15).
+
+    Encoding (within the 8‑bit field):
+    - bit 0 -> valve11
+    - bit 1 -> valve12
+    - bit 2 -> valve13
+    - bit 3 -> valve14
+    - bit 4 -> valve15
+    """
+
+    valve11 = 11
+    valve12 = 12
+    valve13 = 13
+    valve14 = 14
+    valve15 = 15
+
+    def __init__(self):
+        # 8‑bit field; only bits 0–4 are currently used.
+        self.states = 0b00000000
+
+    def set_valve(self, valve_id: int, state: bool):
+        """
+        Set or clear the bit corresponding to a given ILEM valve ID (11–15).
+        """
+        bit_index = valve_id - self.valve11  # map 11–15 -> 0–4
+        if state:
+            self.states |= (1 << bit_index)
+        else:
+            self.states &= ~(1 << bit_index)
+
+    def pack(self):
+        """
+        Pack the 8‑bit integer as a single unsigned char (B format).
+        """
+        fmt = "B"
+        return struct.pack(fmt, self.states)
+
+    def unpack(self, data):
+        """
+        Unpack an 8‑bit unsigned char and update the internal state.
+        """
+        fmt = "B"
+        (self.states,) = struct.unpack(fmt, data)
+
+    def get_valve_state(self, valve_id: int) -> bool:
+        """
+        Return True/False for the given ILEM valve ID (11–15).
+        """
+        bit_index = valve_id - self.valve11
+        return bool(self.states & (1 << bit_index))
 
 
 class OxyPumpCmds:
