@@ -117,7 +117,6 @@ class ILEMController:
         """
         # Pump 1 backwards for ILEM dispense; forward/backward mapping follows PumpDirection
         direction_backward = False
-
         if action == "dispense":
             try:
                 volume_ml = float(cmd.get("volume_ml", 0.0) or 0.0)
@@ -129,10 +128,54 @@ class ILEMController:
             pump_2_speed_ratio = 0.0
             return (direction_backward, speed_hz, pump_2_speed_ratio)
         elif action == "stop":
-            # Explicit stop: 0 Hz, ratio 0
-            return (direction_backward, 0, 0.0)
+            # Explicit STOP for Pump 1: use speed_hz = 1 (per pump driver semantics)
+            # and pump_2_speed_ratio = 0.0.
+            return (direction_backward, 1, 0.0)
 
         return None
+
+    def _build_manifold_valve_payload(self, action: str):
+        """
+        Build a ValveAndAirPumpCmds payload for the main manifold (valves 1–10).
+
+        FR4 requires that during an ILEM dispense we ensure:
+          - valve1, valve3, valve4 and valve7 are effectively closed.
+
+        We achieve this by:
+          - Explicitly setting bits for valves 1, 3 and 7 to 1 (they are
+            normally‑open, so 1 = closed).
+          - Leaving valve4 at 0 (it is normally‑closed, so 0 = closed).
+
+        For STOP, we keep these valves in a safe (closed) state as well, but
+        do not attempt to reopen anything; normal Cycler sequence control
+        will reassert valve patterns afterwards.
+        """
+        try:
+            from command_data_structure import ValveAndAirPumpCmds
+        except Exception:
+            return None
+
+        va = ValveAndAirPumpCmds()
+
+        if action == "dispense":
+            # DISPENSE: enforce FR4 safety by closing valve1, valve3 and valve7.
+            # These are normally-open valves, so bit 1 (HIGH) = closed.
+            try:
+                va.set_valve_air_pump(ValveAndAirPumpCmds.valve1, 1)
+                va.set_valve_air_pump(ValveAndAirPumpCmds.valve3, 1)
+                va.set_valve_air_pump(ValveAndAirPumpCmds.valve7, 1)
+                # Valve4 is normally-closed; default 0 already means closed.
+            except Exception:
+                pass
+        elif action == "stop":
+            # STOP: de‑energise all manifold valves (all bits 0); do not set any
+            # bits here so ValveAndAirPumpCmds.states remains 0.
+            pass
+
+        try:
+            return va.pack()
+        except Exception:
+            return None
 
     # ------------------------------------------------------------------
     # EventBus handlers
@@ -172,6 +215,7 @@ class ILEMController:
             reason = None
             valve_payload = None
             pump_payload = None
+            manifold_payload = None
 
             if not cycler_idle:
                 # Reject when Cycler is busy with transfer or live sequence (FR6)
@@ -185,7 +229,7 @@ class ILEMController:
                 # For now we only implement valve control; pump behaviour will
                 # be added once volume->speed/duration calibration is agreed.
                 accepted = True
-                reason = "ILEM command accepted (valve control active, pump control TBD)."
+                reason = "ILEM command accepted (valve control active, pump control partly implemented)."
                 try:
                     valve_payload = self._build_valve_payload(action, cmd)
                 except Exception:
@@ -194,6 +238,10 @@ class ILEMController:
                     pump_payload = self._build_pump_payload(action, cmd)
                 except Exception:
                     pump_payload = None
+                try:
+                    manifold_payload = self._build_manifold_valve_payload(action)
+                except Exception:
+                    manifold_payload = None
 
                 # Apply valve state immediately via ILEMActuator
                 try:
@@ -201,6 +249,20 @@ class ILEMController:
                         await self.event_bus.publish("lem-actuator", valve_payload)
                 except Exception:
                     # Keep going so we still emit an ack even if valve publish fails
+                    pass
+
+                # Apply Pump 1 command via PumpActuator on oxy-pump-01-act
+                try:
+                    if pump_payload is not None and self.event_bus:
+                        await self.event_bus.publish("oxy-pump-01-act", pump_payload)
+                except Exception:
+                    pass
+
+                # Apply main manifold valve safety frame (valves 1,3,4,7 closed)
+                try:
+                    if manifold_payload is not None and self.event_bus:
+                        await self.event_bus.publish("valve-airpump-cmds", manifold_payload)
+                except Exception:
                     pass
 
             ack = {
@@ -226,6 +288,8 @@ class ILEMController:
                     "speed_hz": int(s),
                     "pump_2_speed_ratio": float(r),
                 }
+            if manifold_payload is not None:
+                ack["placeholder_manifold_valve_payload"] = list(manifold_payload)
 
             try:
                 self.logger.send_system_message("ilem_controller", ack)
