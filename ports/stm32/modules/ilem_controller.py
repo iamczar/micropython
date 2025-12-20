@@ -22,13 +22,40 @@ class ILEMController:
     will be layered on top once the basic command path is validated.
     """
 
-    def __init__(self, event_bus: EventBus, logger: SimpleLogger):
+    def __init__(self, event_bus: EventBus, logger: SimpleLogger, tube_bore=None, pump_speed_hz=None):
         self.event_bus = event_bus
         self.logger = logger
 
         # Latest known states
         self._file_transfer_state = "idle"     # AlphaCommsManager state
         self._sequence_state = "idle"          # SequenceController state
+
+        # Pump/flow calibration for ILEM dispense
+        # Microsteps per revolution: 8 microsteps * 200 steps
+        self._microsteps_per_rev = 8 * 200
+        # Tube bore mapping reused from CircFlowController (µL / revolution)
+        self._tube_bore_map = {
+            1: 170.0,   # 1.6mm
+            2: 320.0,   # 2.4mm
+            3: 495.0,   # 3.2mm
+            4: 655.7,   # 4.8mm
+        }
+        # Calibrated tube_bore and rate
+        try:
+            tb = int(tube_bore) if tube_bore is not None else 3
+        except Exception:
+            tb = 3
+        self._tube_bore = tb
+        self._tube_rate_ul_per_rev = self._tube_bore_map.get(self._tube_bore, self._tube_bore_map[3])
+
+        # Fixed pump speed for ILEM dispense (Hz, i.e. microsteps/second)
+        try:
+            self._pump_speed_hz = float(pump_speed_hz) if pump_speed_hz is not None else 1100.0
+        except Exception:
+            self._pump_speed_hz = 1100.0
+
+        # Track an active dispense task so STOP can cancel it
+        self._active_dispense_task = None
 
         # Subscribe to internal status topics
         self.event_bus.subscribe("file-transfer-status", self._on_file_transfer_status)
@@ -56,7 +83,7 @@ class ILEMController:
         return not (self._is_transfer_busy() or self._is_sequence_busy())
 
     # ------------------------------------------------------------------
-    # Placeholder helpers for future valve + pump control
+    # Valve helpers
     # ------------------------------------------------------------------
     def _build_valve_payload(self, action: str, cmd: dict):
         """
@@ -104,35 +131,78 @@ class ILEMController:
         except Exception:
             return None
 
-    def _build_pump_payload(self, action: str, cmd: dict):
-        """
-        Placeholder helper that builds the tuple we would send to
-        'oxy-pump-01-act'.
+    # ------------------------------------------------------------------
+    # Pump helpers (ILEM dispense profile + runtime task)
+    # ------------------------------------------------------------------
 
-        Expected format (matching CircFlowController):
-            (direction: bool, speed_hz: int, pump_2_speed_ratio: float)
-
-        For now, this does NOT attempt to compute real speed/duration from
-        volume_ml; that calibration will be added later.
+    def _compute_pump_profile(self, action: str, cmd: dict):
         """
-        # Pump 1 backwards for ILEM dispense; forward/backward mapping follows PumpDirection
+        Compute (direction, speed_hz, pump_2_speed_ratio, duration_sec)
+        for an ILEM command.
+
+        duration_sec is only meaningful for "dispense".
+        """
+        # Pump 1 backwards for ILEM dispense; forward/backward mapping
+        # follows PumpDirection in PumpActuator.
         direction_backward = False
+
         if action == "dispense":
             try:
                 volume_ml = float(cmd.get("volume_ml", 0.0) or 0.0)
             except Exception:
                 volume_ml = 0.0
-            # TODO: derive speed_hz and duration from volume_ml and calibration constants.
-            # For now, use a safe placeholder of 0 Hz (no motion).
-            speed_hz = 0
+
+            if volume_ml <= 0.0:
+                return None
+
+            tube_rate = float(self._tube_rate_ul_per_rev or 0.0)
+            if tube_rate <= 0.0:
+                return None
+
+            speed_hz = float(self._pump_speed_hz)
+            if speed_hz <= 0.0:
+                return None
+
+            # Convert volume to µL
+            volume_ul = volume_ml * 1000.0
+            # Flow (µL/s) at speed_hz microsteps/s:
+            # Q = (speed_hz / microsteps_per_rev) * tube_rate_ul_per_rev
+            flow_ul_per_sec = (speed_hz / float(self._microsteps_per_rev)) * tube_rate
+            if flow_ul_per_sec <= 0.0:
+                return None
+
+            # Duration to deliver volume_ul at this flow
+            duration_sec = volume_ul / flow_ul_per_sec
+
+            # Guard against extreme durations
+            duration_sec = max(0.1, min(duration_sec, 3600.0))
+
             pump_2_speed_ratio = 0.0
-            return (direction_backward, speed_hz, pump_2_speed_ratio)
+            return (direction_backward, speed_hz, pump_2_speed_ratio, duration_sec)
+
         elif action == "stop":
             # Explicit STOP for Pump 1: use speed_hz = 1 (per pump driver semantics)
-            # and pump_2_speed_ratio = 0.0.
-            return (direction_backward, 1, 0.0)
+            # and pump_2_speed_ratio = 0.0. No duration for STOP.
+            return (direction_backward, 1, 0.0, 0.0)
 
         return None
+
+    def _build_pump_payload(self, action: str, cmd: dict):
+        """
+        Build the tuple we would send to 'oxy-pump-01-act'.
+
+        Expected format (matching CircFlowController):
+            (direction: bool, speed_hz: int, pump_2_speed_ratio: float)
+
+        This helper is used to mirror would-be pump commands into acks for
+        debugging. The actual runtime behaviour for DISPENSE is managed by
+        an internal asyncio task started from _on_lem_cmd.
+        """
+        profile = self._compute_pump_profile(action, cmd)
+        if profile is None:
+            return None
+        direction_backward, speed_hz, pump_2_speed_ratio, _ = profile
+        return (direction_backward, int(speed_hz), float(pump_2_speed_ratio))
 
     def _build_manifold_valve_payload(self, action: str):
         """
@@ -176,6 +246,138 @@ class ILEMController:
             return va.pack()
         except Exception:
             return None
+
+    async def _send_pump_and_valve_stop(self):
+        """
+        Send STOP commands to pump and valves to leave ILEM in a safe state.
+        """
+        try:
+            # Pump STOP
+            stop_profile = self._compute_pump_profile("stop", {})
+            if stop_profile is not None and self.event_bus:
+                d, s, r, _ = stop_profile
+                await self.event_bus.publish("oxy-pump-01-act", (d, int(s), float(r)))
+        except Exception:
+            pass
+
+        # ILEM valves: all closed
+        try:
+            valve_payload = self._build_valve_payload("stop", {})
+            if valve_payload is not None and self.event_bus:
+                await self.event_bus.publish("lem-actuator", valve_payload)
+        except Exception:
+            pass
+
+        # Manifold safety frame: STOP state (all bits 0)
+        try:
+            manifold_payload = self._build_manifold_valve_payload("stop")
+            if manifold_payload is not None and self.event_bus:
+                await self.event_bus.publish("valve-airpump-cmds", manifold_payload)
+        except Exception:
+            pass
+
+    async def _dispense_task(self, cmd: dict, profile, valve_payload, manifold_payload):
+        """
+        Long-running task that owns a single ILEM dispense:
+          - Opens ILEM + manifold valves
+          - Starts Pump 1 at the computed speed
+          - Waits for the computed duration
+          - Sends STOP to pump and valves
+        """
+        try:
+            direction_backward, speed_hz, pump_2_speed_ratio, duration_sec = profile
+
+            # Apply ILEM valves
+            try:
+                if valve_payload is not None and self.event_bus:
+                    await self.event_bus.publish("lem-actuator", valve_payload)
+            except Exception:
+                pass
+
+            # Apply manifold safety frame
+            try:
+                if manifold_payload is not None and self.event_bus:
+                    await self.event_bus.publish("valve-airpump-cmds", manifold_payload)
+            except Exception:
+                pass
+
+            # Start Pump 1
+            try:
+                if self.event_bus:
+                    await self.event_bus.publish(
+                        "oxy-pump-01-act",
+                        (direction_backward, int(speed_hz), float(pump_2_speed_ratio)),
+                    )
+            except Exception:
+                pass
+
+            # Wait for duration, allowing cancellation
+            remaining = float(duration_sec or 0.0)
+            while remaining > 0:
+                step = 0.5 if remaining > 0.5 else remaining
+                await asyncio.sleep(step)
+                remaining -= step
+
+            # On normal completion, send STOP
+            await self._send_pump_and_valve_stop()
+
+        except asyncio.CancelledError:
+            # STOP handler will take care of safe shutdown; just exit.
+            raise
+        except Exception as e:
+            try:
+                self.logger.error(f"ILEMController._dispense_task error: {e}")
+            except Exception:
+                pass
+            # Best-effort safe stop
+            try:
+                await self._send_pump_and_valve_stop()
+            except Exception:
+                pass
+        finally:
+            # Clear active task reference
+            self._active_dispense_task = None
+
+    def _start_dispense_task(self, cmd: dict, profile, valve_payload, manifold_payload):
+        """
+        Start a new dispense task if none is active.
+        """
+        # Avoid overlapping dispenses; if one is already running, we do not start another.
+        if self._active_dispense_task is not None:
+            try:
+                self.logger.error("ILEMController: dispense requested while another is active")
+            except Exception:
+                pass
+            return False
+
+        try:
+            task = asyncio.create_task(self._dispense_task(cmd, profile, valve_payload, manifold_payload))
+        except Exception as e:
+            try:
+                self.logger.error(f"ILEMController: unable to start dispense task: {e}")
+            except Exception:
+                pass
+            return False
+
+        self._active_dispense_task = task
+        return True
+
+    async def _cancel_dispense_if_any(self):
+        """
+        Cancel an active dispense task (if present) and send STOP to pump/valves.
+        """
+        task = self._active_dispense_task
+        self._active_dispense_task = None
+        if task is not None:
+            try:
+                task.cancel()
+            except Exception:
+                pass
+        # In all cases, enforce STOP on pump + valves
+        try:
+            await self._send_pump_and_valve_stop()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # EventBus handlers
@@ -226,10 +428,10 @@ class ILEMController:
                 else:
                     reason = "Unable to execute ILEM command – Cycler not idle."
             else:
-                # For now we only implement valve control; pump behaviour will
-                # be added once volume->speed/duration calibration is agreed.
-                accepted = True
-                reason = "ILEM command accepted (valve control active, pump control partly implemented)."
+                # Build placeholder payloads for debug/ack, and if action is
+                # 'dispense' schedule a runtime dispense task. For 'stop' we
+                # immediately cancel any active dispense and force a STOP on
+                # pump + valves.
                 try:
                     valve_payload = self._build_valve_payload(action, cmd)
                 except Exception:
@@ -243,27 +445,24 @@ class ILEMController:
                 except Exception:
                     manifold_payload = None
 
-                # Apply valve state immediately via ILEMActuator
-                try:
-                    if valve_payload is not None and self.event_bus:
-                        await self.event_bus.publish("lem-actuator", valve_payload)
-                except Exception:
-                    # Keep going so we still emit an ack even if valve publish fails
-                    pass
-
-                # Apply Pump 1 command via PumpActuator on oxy-pump-01-act
-                try:
-                    if pump_payload is not None and self.event_bus:
-                        await self.event_bus.publish("oxy-pump-01-act", pump_payload)
-                except Exception:
-                    pass
-
-                # Apply main manifold valve safety frame (valves 1,3,4,7 closed)
-                try:
-                    if manifold_payload is not None and self.event_bus:
-                        await self.event_bus.publish("valve-airpump-cmds", manifold_payload)
-                except Exception:
-                    pass
+                if action == "dispense":
+                    # Compute pump profile (including duration) and start a
+                    # background dispense task if possible.
+                    profile = self._compute_pump_profile(action, cmd)
+                    if profile is None:
+                        reason = "Unable to execute ILEM command – invalid volume or calibration."
+                    else:
+                        started = self._start_dispense_task(cmd, profile, valve_payload, manifold_payload)
+                        if started:
+                            accepted = True
+                            reason = "ILEM command accepted (valve + pump control active)."
+                        else:
+                            reason = "Unable to execute ILEM command – another dispense is already active."
+                elif action == "stop":
+                    # Cancel any active dispense and send STOP to pump/valves
+                    await self._cancel_dispense_if_any()
+                    accepted = True
+                    reason = "ILEM STOP command accepted; dispense stopped and valves set safe."
 
             ack = {
                 "event": "ilem_cmd_ack",
