@@ -17,7 +17,10 @@ import utime
 from event_bus import EventBus
 from simple_logger import SimpleLogger
 from command_data_structure import (
-    OxyPumpCmds, PressurePumpCmds, ValveAndAirPumpCmds,
+    OxyPumpCmds,
+    PressurePumpCmds,
+    ValveAndAirPumpCmds,
+    ILEMValveCmds,
 )
 
 
@@ -613,17 +616,30 @@ class SequenceController:
             pres_cmd.pump2dir = 1 if data.get("pump2Dir", True) else 0
             pres_cmd.tube_bore = int(data.get("tube_bore", 1))
             
-            # Valves and air pumps
+            # Valves and air pumps (main manifold 1–10 + airpumps 1–2)
             va_cmd = ValveAndAirPumpCmds()
             for idx in range(1, 11):
-                key = f"valve{idx}"
+                key = "valve%d" % idx
                 if key in data:
                     va_cmd.set_valve_air_pump(idx, 1 if data.get(key) else 0)
             if "airpump1" in data:
                 va_cmd.set_valve_air_pump(ValveAndAirPumpCmds.airpump1, 1 if data.get("airpump1") else 0)
             if "airpump2" in data:
                 va_cmd.set_valve_air_pump(ValveAndAirPumpCmds.airpump2, 1 if data.get("airpump2") else 0)
-            
+
+            # Integrated LEM valves (11–15) – extended FR2 sequence schema
+            ilem_cmd = ILEMValveCmds()
+            for v in (
+                ILEMValveCmds.valve11,
+                ILEMValveCmds.valve12,
+                ILEMValveCmds.valve13,
+                ILEMValveCmds.valve14,
+                ILEMValveCmds.valve15,
+            ):
+                key = "valve%d" % v
+                state = bool(data.get(key, False))
+                ilem_cmd.set_valve(v, state)
+
             # Wrist
             wrist_cmd = int(data.get("wristCmd", 0))
             
@@ -632,6 +648,8 @@ class SequenceController:
                 asyncio.create_task(self.event_bus.publish("oxy-pump-cmds", oxy_cmd.pack()))
                 asyncio.create_task(self.event_bus.publish("pressure-pump-cmd", pres_cmd.pack()))
                 asyncio.create_task(self.event_bus.publish("valve-airpump-cmds", va_cmd.pack()))
+                # ILEM actuator receives packed ILEMValveCmds on 'lem-actuator'
+                asyncio.create_task(self.event_bus.publish("lem-actuator", ilem_cmd.pack()))
                 asyncio.create_task(self.event_bus.publish("wrist-cmds", wrist_cmd))
 
             # Remember last
