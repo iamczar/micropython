@@ -63,7 +63,8 @@ class ILEMActuator:
             return
 
         gpio = self.valve_to_gpio[valve_id]
-        self.expander.digital_write(gpio, open_)
+        # Invert logical open_/closed before driving GPIO (active‑low coil)
+        self.expander.digital_write(gpio, not open_)
 
     def set_all_closed(self):
         """
@@ -82,10 +83,10 @@ class ILEMActuator:
             cmd = self._cmd_cls()
             cmd.unpack(data)
 
-            # Apply each valve state to the corresponding GPIO.
-            for valve_id, gpio in self.valve_to_gpio.items():
+            # Apply each valve state via set_valve (which handles inversion).
+            for valve_id in self.valve_to_gpio:
                 state = cmd.get_valve_state(valve_id)
-                self.expander.digital_write(gpio, state)
+                self.set_valve(valve_id, state)
 
             # Send status/ack message directly to host via logger/system stream.
             if self.logger:
