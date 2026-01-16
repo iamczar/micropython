@@ -50,9 +50,9 @@ class ILEMActuator:
         """
         # 0 = output on PCA6408A CONFIG bits
         self.expander.set_config(0x00)
-        # All ILEM valves (GPIO1–GPIO5) start "closed" under active‑low logic:
-        # set bits 1–5 high (0b00111110 = 0x3E), others low.
-        self.expander.write_outputs(0x3E)
+        # ILEM media valves (GPIO1–GPIO4) start "closed" under active‑low logic:
+        # set bits 1–4 high (0b00011110 = 0x1E); GPIO5 starts low (non‑inverted).
+        self.expander.write_outputs(0x1E)
 
     def set_valve(self, valve_id: int, open_: bool):
         """
@@ -64,8 +64,9 @@ class ILEMActuator:
             return
 
         gpio = self.valve_to_gpio[valve_id]
-        # Invert logical open_/closed before driving GPIO (active‑low coil)
-        self.expander.digital_write(gpio, not open_)
+        # Invert logical open_/closed only for GPIO1–GPIO4 (valves 11–14).
+        invert = gpio in (1, 2, 3, 4)
+        self.expander.digital_write(gpio, (not open_) if invert else open_)
 
     def set_all_closed(self):
         """
