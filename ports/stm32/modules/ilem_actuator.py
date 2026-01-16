@@ -50,8 +50,9 @@ class ILEMActuator:
         """
         # 0 = output on PCA6408A CONFIG bits
         self.expander.set_config(0x00)
-        # All valves closed by default
-        self.expander.write_outputs(0x00)
+        # All ILEM valves (GPIO1–GPIO5) start "closed" under active‑low logic:
+        # set bits 1–5 high (0b00111110 = 0x3E), others low.
+        self.expander.write_outputs(0x3E)
 
     def set_valve(self, valve_id: int, open_: bool):
         """
